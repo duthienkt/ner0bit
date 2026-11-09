@@ -17,6 +17,31 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 - Dây điện đi mạch, board đồng đục lỗ, dây header các loại.
 - Nguồn cấp và ống dẫn nước, vòi tưới....
 
+## Cấu trúc repo
+
+```
+ner0bit/
+├── firmware/   # Firmware ESP32-C3 (PlatformIO + Arduino)
+├── docs/       # Tài liệu, sơ đồ mạch
+└── assets/     # Logo, hình ảnh
+```
+
+Thư mục `server/` (API đồng bộ lịch tưới) sẽ được thêm sau.
+
+## Phát triển firmware
+
+Yêu cầu: [PlatformIO](https://platformio.org/) (extension VSCode hoặc CLI `pio`).
+
+```bash
+cd firmware
+pio run        # build
+pio run -t upload    # nạp vào board
+pio device monitor   # xem Serial log (Ctrl+C để thoát)
+```
+
+Board: ESP32-C3 Super Mini, LED onboard GPIO 8 (active-LOW).
+
 ## Trạng thái triển khai
 
 Đang chờ linh kiện
+
