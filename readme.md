@@ -21,20 +21,22 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 
 ```
 ner0bit/
-├── firmware/   # Firmware ESP32-C3 (PlatformIO + Arduino)
-├── docs/       # Tài liệu, sơ đồ mạch
-└── assets/     # Logo, hình ảnh
+├── firmware/    # Firmware ESP32-C3 chính (sẽ tạo khi phát triển thật)
+├── playground/  # Code thử nghiệm
+│   └── blink/   # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
+├── docs/        # Tài liệu, sơ đồ mạch
+└── assets/      # Logo, hình ảnh
 ```
 
 Thư mục `server/` (API đồng bộ lịch tưới) sẽ được thêm sau.
 
-## Phát triển firmware
+## Chạy code thử nghiệm
 
 Yêu cầu: [PlatformIO](https://platformio.org/) (extension VSCode hoặc CLI `pio`).
 
 ```bash
-cd firmware
-pio run        # build
+cd playground/blink
+pio run              # build
 pio run -t upload    # nạp vào board
 pio device monitor   # xem Serial log (Ctrl+C để thoát)
 ```
