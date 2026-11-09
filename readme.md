@@ -2,33 +2,40 @@
 
 Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thiết bị kết nối Internet để đồng bộ lịch tưới từ máy chủ và điều khiển tưới theo lịch. Mục tiêu là giảm công tưới thủ công và cho phép cập nhật lịch tưới từ xa.
 
-## Tính năng dự kiến
+## Tính năng
 
-- Kết nối Wi-Fi để nhận và đồng bộ lịch tưới từ máy chủ.
-- Tự động bật và tắt bơm hoặc van điện theo lịch đã đồng bộ.
+- Kết nối Wi-Fi, mỗi 5 phút POST heartbeat lên server và nhận lịch tưới mới.
+- Tưới theo lịch: bật/tắt bơm đúng mốc giờ (RTC DS3231, độc lập mạng).
+- Failsafe: mất internet vẫn tưới theo lịch cache lần fetch cuối; events gửi bù khi có mạng lại.
+- Setup lần đầu qua WiFi hotspot (captive portal): điền WiFi + Server URL.
+- An toàn bơm: hard-cap 30 phút/phiên, nghỉ tối thiểu 10 phút giữa 2 lần bật.
 
-## Phần cứng dự kiến
-- Bo mạch ESP32-C3 supper mini.
+Chi tiết thiết kế và interface ESP ↔ server: [docs/system-design.md](docs/system-design.md).
+
+## Phần cứng
+- Bo mạch ESP32-C3 Super Mini.
 - Mạch đồng hồ DS3231 tích hợp AT24C32.
-- MOSFET
-- Mạch hạ áp (5V).
-- Bơm nước (24V).
-- Nguồn 19-24V.
+- MOSFET IRLB8721 (+ tản nhiệt, diode flyback 10A10).
+- Buck 24V→5V.
+- Bơm rửa xe 12/24V (thiết kế chạy 24V).
+- Nguồn 24V ≥6A.
 - Dây điện đi mạch, board đồng đục lỗ, dây header các loại.
-- Nguồn cấp và ống dẫn nước, vòi tưới....
+- Ống dẫn nước, vòi tưới....
 
 ## Cấu trúc repo
 
 ```
 ner0bit/
-├── firmware/    # Firmware ESP32-C3 chính (sẽ tạo khi phát triển thật)
-├── playground/  # Code thử nghiệm
-│   └── blink/   # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
-├── docs/        # Tài liệu, sơ đồ mạch
-└── assets/      # Logo, hình ảnh
+├── firmware/          # Firmware ESP32-C3 chính (sẽ tạo khi phát triển thật)
+├── playground/        # Code thử nghiệm
+│   └── blink/         # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
+├── php-server/        # Server PHP: heartbeat + sinh lịch (viết sau, theo interface trong docs)
+├── web-client/        # Web UI xem trạng thái + sửa lịch (viết sau)
+├── enclosure-design/  # Hộp đựng (Blender)
+├── docs/              # Tài liệu, thiết kế
+│   └── system-design.md
+└── assets/            # Logo, hình ảnh
 ```
-
-Thư mục `server/` (API đồng bộ lịch tưới) sẽ được thêm sau.
 
 ## Chạy code thử nghiệm
 
@@ -45,5 +52,5 @@ Board: ESP32-C3 Super Mini, LED onboard GPIO 8 (active-LOW).
 
 ## Trạng thái triển khai
 
-Đang chờ linh kiện
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Đang chờ linh kiện để dựng mạch và viết firmware.
 
