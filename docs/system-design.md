@@ -77,6 +77,15 @@ Content-Type: application/json
 
 Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sau 5 phút.
 
+### Quy tắc parse ở ESP
+
+- ESP chỉ phải parse 2 dòng lịch — bằng C thuần (`strtok`/`strtoul`), không cần thư viện JSON. Heartbeat JSON chỉ được tạo ra (`snprintf`), không bao giờ parse.
+- Format canonical không chứa khoảng trắng (`25200:900,61200`); parser chấp nhận CRLF và khoảng trắng thừa quanh số.
+- Mỗi dòng tối đa **20 mốc**, nhận theo thứ tự xuất hiện, phần dư bỏ.
+- Entry sai bị **bỏ lẻ**, không văng cả file: token không phải số, giây ≥ 86400, hoặc duration = 0.
+- Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (PHP không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
+- HTTPS qua `WiFiClientSecure` (TLS), timeout request 10 giây; network chạy trong FreeRTOS task riêng, không được chặn scheduler bơm (1 giây/lần).
+
 ## Scheduler & an toàn bơm
 
 - Mỗi giây so giờ RTC với lịch hiện hành; đến mốc thì bật bơm, tắt sau duration.
