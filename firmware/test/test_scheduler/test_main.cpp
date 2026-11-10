@@ -399,6 +399,78 @@ void test_large_backward_clock_jump_unblocks_entries() {
     expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
 }
 
+// I1: đọc đồng hồ lỗi giữa phiên ⇒ abort kết thúc phiên (stop tính theo monotonic), không chạy lại.
+void test_abort_while_running_ends_session() {
+    Scheduler s;
+    s.setSchedule(sch("25200:900"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 100);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 1, 0), 160);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.abort(220);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 2, 0), Source::Normal, 0);
+    TEST_ASSERT_TRUE(r.lastStopChanged);
+    TEST_ASSERT_EQUAL_UINT32(T(D, 7, 2, 0), r.lastStop);
+    // Đồng hồ đọc lại được, vẫn trong khung mốc ⇒ bơm không bật lại.
+    r = s.tick(T(D, 7, 2, 1), 221);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    r = s.tick(T(D, 7, 14, 59), 999);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    r = s.tick(T(D, 7, 15, 0), 1000);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+}
+
+void test_abort_applies_rest_to_next_entry() {
+    Scheduler s;
+    s.setSchedule(sch("25200:900,25500,26100"), D);  // 07:00, 07:05, 07:15
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 100);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.abort(220);  // dừng lúc 07:02
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 2, 0), Source::Normal, 0);
+    r = s.tick(T(D, 7, 5, 0), 400);  // mới nghỉ 180 s
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 5, 0), 0, Source::Normal, kSkippedRest);
+    r = s.tick(T(D, 7, 15, 0), 1000);  // nghỉ 780 s
+    TEST_ASSERT_TRUE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+}
+
+void test_abort_stop_clamped_to_session_duration() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 100);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.abort(5000);  // không có tick nào kết thúc phiên trước đó
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
+    TEST_ASSERT_EQUAL_UINT32(T(D, 7, 5, 0), r.lastStop);
+}
+
+void test_abort_while_idle_is_noop() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300"), D);
+    s.setFetchOk(true);
+    TickResult r = s.abort(50);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    TEST_ASSERT_FALSE(r.lastStopChanged);
+    // Không đặt trạng thái nghỉ: mốc kế tiếp vẫn chạy.
+    r = s.tick(T(D, 7, 0, 0), 100);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 5, 0), 400);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
+    // Phiên đã kết thúc bình thường ⇒ abort cũng không làm gì.
+    r = s.abort(401);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    TEST_ASSERT_FALSE(r.lastStopChanged);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_starts_at_entry_and_stops_after_duration);
@@ -427,5 +499,9 @@ int main() {
     RUN_TEST(test_busy_skips_one_event_per_tick_in_order);
     RUN_TEST(test_stop_event_has_priority_over_busy);
     RUN_TEST(test_large_backward_clock_jump_unblocks_entries);
+    RUN_TEST(test_abort_while_running_ends_session);
+    RUN_TEST(test_abort_applies_rest_to_next_entry);
+    RUN_TEST(test_abort_stop_clamped_to_session_duration);
+    RUN_TEST(test_abort_while_idle_is_noop);
     return UNITY_END();
 }

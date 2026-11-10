@@ -150,19 +150,56 @@ void markFetchFailed() {
     g_sched.setFetchOk(false);
 }
 
-// Đọc body 200 vào s_body. false nếu lỗi đọc hoặc quá kScheduleBodyMax - 1 byte.
+// Đọc body 200 thẳng từ stream vào s_body (không cấp phát String), tối đa kScheduleBodyMax − 1
+// byte, cả pha đọc trong kHttpTimeoutMs. false nếu lỗi/timeout, thiếu byte so với Content-Length,
+// hoặc chạm giới hạn (body dài hơn ⇒ lịch lỗi). Request dùng HTTP/1.0 nên body không chunked.
 bool readBody(HTTPClient& http) {
-    const int size = http.getSize();  // -1 khi chunked / không có Content-Length
+    const int size = http.getSize();  // -1 khi không có Content-Length (body hết khi đóng kết nối)
     if (size >= (int)kScheduleBodyMax) {
         Serial.printf("[net] body quá dài (%d byte)\n", size);
         return false;
     }
-    String body = http.getString();
-    if (body.length() >= kScheduleBodyMax) {
-        Serial.printf("[net] body quá dài (%u byte)\n", (unsigned)body.length());
+    const String te = http.header("Transfer-Encoding");
+    if (te.length() > 0 && !te.equalsIgnoreCase("identity")) {
+        Serial.println("[net] body có Transfer-Encoding (không hỗ trợ với HTTP/1.0)");
         return false;
     }
-    memcpy(s_body, body.c_str(), body.length() + 1);
+    const size_t limit = size >= 0 ? (size_t)size : kScheduleBodyMax - 1;
+    size_t len = 0;
+    NetworkClient* stream = size == 0 ? nullptr : http.getStreamPtr();
+    if (size != 0 && !stream) {
+        Serial.println("[net] lỗi đọc body: mất kết nối");
+        return false;
+    }
+    const uint32_t t0 = millis();
+    while (len < limit) {
+        if (millis() - t0 >= kHttpTimeoutMs) {
+            Serial.printf("[net] lỗi đọc body: timeout (%u byte)\n", (unsigned)len);
+            return false;
+        }
+        const int avail = stream->available();
+        if (avail > 0) {
+            size_t want = limit - len;
+            if ((size_t)avail < want) want = (size_t)avail;
+            const int got = stream->read((uint8_t*)s_body + len, want);
+            if (got > 0) {
+                len += (size_t)got;
+                continue;
+            }
+        } else if (!stream->connected()) {
+            break;  // server đóng kết nối
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    s_body[len] = '\0';
+    if (size >= 0 && len < (size_t)size) {
+        Serial.printf("[net] lỗi đọc body: nhận %u/%d byte\n", (unsigned)len, size);
+        return false;
+    }
+    if (size < 0 && len >= kScheduleBodyMax - 1) {
+        Serial.printf("[net] body quá dài (≥ %u byte)\n", (unsigned)len);
+        return false;
+    }
     return true;
 }
 
@@ -175,12 +212,14 @@ bool heartbeat() {
     }
 
     uint16_t n;
+    uint32_t droppedAtPeek;
     bool pumpOn;
     bool clockOk;
     uint32_t rtc = 0;
     {
         SharedLock lock;
         n = g_queue.peek(s_events, kMaxEventsPerHeartbeat);
+        droppedAtPeek = g_queue.dropped();
         pumpOn = pump::isOn();
         clockOk = g_clockValid && localNow(rtc);
     }
@@ -199,6 +238,7 @@ bool heartbeat() {
 
     Serial.printf("[net] POST %s (%u events, %u byte)\n", s_cfg.url, (unsigned)n, (unsigned)len);
     HTTPClient http;
+    http.useHTTP10(true);  // không chunked ⇒ đọc body thô từ stream được (readBody); kèm reuse=false
     http.setReuse(false);
     http.setConnectTimeout(kHttpTimeoutMs);
     http.setTimeout(kHttpTimeoutMs);
@@ -209,8 +249,8 @@ bool heartbeat() {
     }
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", auth);
-    const char* collect[] = {"Date"};
-    http.collectHeaders(collect, 1);
+    const char* collect[] = {"Date", "Transfer-Encoding"};
+    http.collectHeaders(collect, 2);
     const int code = http.POST((uint8_t*)s_json, len);
     const uint32_t respMono = monoSec();
 
@@ -237,7 +277,9 @@ bool heartbeat() {
     uint16_t remaining;
     {
         SharedLock lock;
-        g_queue.pop(n);  // 200 ⇒ xoá events vừa gửi, kể cả khi lịch lỗi
+        // 200 ⇒ xoá events vừa gửi, kể cả khi lịch lỗi. Queue đầy mà scheduler push trong lúc
+        // gửi ⇒ vài event đã gửi bị ghi đè rồi: chỉ pop phần còn lại, không pop event chưa gửi.
+        g_queue.popSent(n, droppedAtPeek);
         remaining = g_queue.count();
         uint32_t now = 0;
         if (parsed && g_clockValid && localNow(now)) {
@@ -293,9 +335,16 @@ void netTask(void*) {
         const bool connected = WiFi.status() == WL_CONNECTED;
 
         if (!connected) {
+            // Không heartbeat được ⇒ coi như fetch lỗi: phiên mới mang source failsafe. Báo ngay
+            // khi vừa mất WiFi, rồi mỗi lần tới hạn heartbeat.
             if (wasConnected) {
                 Serial.println("[net] WiFi: mất kết nối");
                 wasConnected = false;
+                markFetchFailed();
+                nextHb = now + kHeartbeatS;
+            } else if ((int32_t)(now - nextHb) >= 0) {
+                markFetchFailed();
+                nextHb = now + kHeartbeatS;
             }
             if (elapsed(now, lastBegin, kWifiRetryS)) {
                 wifiBegin();

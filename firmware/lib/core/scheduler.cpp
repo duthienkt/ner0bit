@@ -62,6 +62,24 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
     return r;
 }
 
+TickResult Scheduler::abort(uint32_t mono) {
+    TickResult r{};
+    r.lastStop = lastStop_;
+    if (!running_) return r;
+    uint32_t ran = mono - monoStart_;
+    if (ran > runDur_) ran = runDur_;
+    const uint32_t stop = startActual_ + ran;
+    running_ = false;
+    lastStop_ = stop;
+    haveRunStop_ = true;
+    monoLastStop_ = mono;
+    r.hasEvent = true;
+    r.event = Event{startActual_, stop, runSource_, runFlags_};
+    r.lastStopChanged = true;
+    r.lastStop = stop;
+    return r;
+}
+
 bool Scheduler::findDue(uint32_t now, bool requireOpen, Candidate& best) const {
     const uint32_t today = now / 86400;
     bool found = false;

@@ -56,6 +56,8 @@ Quy trình:
 
 1. ESP phát WiFi `Ner0bit-Setup` (AP mode, **không mật khẩu**), captive portal tại `192.168.4.1`.
 2. Form điền: WiFi SSID, WiFi password, **Server URL** (bắt buộc `https://`), **Token**.
+   - Lần setup đầu (chưa có cấu hình) **bắt buộc điền Token**.
+   - Đã có cấu hình: để trống password/Token ⇒ giữ giá trị cũ. Nhưng **đổi Server URL thì phải nhập lại Token** (AP không mật khẩu — không cho ai đó trỏ thiết bị sang server lạ để nhận token cũ).
 3. Lưu vào NVS, khởi động lại, nối WiFi nhà.
 
 Scheduler bơm vẫn chạy bình thường trong lúc ở chế độ cấu hình. Nếu đã có cấu hình cũ mà 10 phút không ai lưu form ⇒ tự reboot về chế độ thường với cấu hình cũ (tránh AP mở mãi khi lỡ vào setup).
@@ -133,7 +135,8 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 - Mỗi dòng tối đa **20 mốc**, nhận theo thứ tự xuất hiện, phần dư bỏ.
 - Entry sai bị **bỏ lẻ**, không văng cả file: token không phải số, giây ≥ 86400, hoặc duration = 0.
 - Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (PHP không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
-- HTTPS qua `WiFiClientSecure` (TLS), timeout request 10 giây; network chạy trong FreeRTOS task riêng, không được chặn scheduler bơm (1 giây/lần).
+- Request gửi bằng **HTTP/1.0** (`Connection: close`) nên response không chunked; ESP đọc body thẳng vào buffer cố định, body lịch tối đa **1023 byte** (dài hơn ⇒ coi như lịch lỗi, giữ cache).
+- HTTPS qua `WiFiClientSecure` (TLS). Timeout 10 giây **cho từng pha** (kết nối TCP, bắt tay TLS, đọc response) — một request xấu nhất có thể kéo dài vài chục giây, nhưng không bao giờ chặn scheduler bơm (1 giây/lần) vì network chạy trong FreeRTOS task riêng.
 
 ### TLS
 

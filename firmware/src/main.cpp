@@ -35,6 +35,7 @@ void setup() {
     const bool hasCache = config::loadSchedule(s_schedBody, sizeof s_schedBody, fetchDay);
     const bool cacheOk = hasCache && parseSchedule(s_schedBody, s_schedule);
     bool rtcOk;
+    bool queueOk;
     uint16_t queued;
     uint32_t lastStop;
     {
@@ -45,12 +46,17 @@ void setup() {
         g_clockValid = rtcOk && !ds3231::lostPower();
         if (cacheOk) g_sched.setSchedule(s_schedule, fetchDay);
         g_sched.setFetchOk(false);
+        queueOk = g_queue.available();
         queued = g_queue.count();
         lastStop = g_queue.lastStop();
     }
     Serial.printf("[main] DS3231 %s, đồng hồ %s; queue %u events, lastStop %lu\n",
                   rtcOk ? "OK" : "KHÔNG PHẢN HỒI", g_clockValid ? "hợp lệ" : "CHƯA HỢP LỆ (chờ NTP)",
                   (unsigned)queued, (unsigned long)lastStop);
+    if (!queueOk) {
+        Serial.println("[main] lỗi: không đọc được header queue trên AT24C32 — queue tạm không dùng "
+                       "(events phiên này không lưu, lastStop coi như 0), không format");
+    }
     Serial.printf("[main] lịch cache: %s\n",
                   cacheOk ? "đã nạp" : (hasCache ? "lỗi, bỏ qua" : "chưa có"));
 

@@ -33,8 +33,13 @@ uint32_t monoSec();
 
 // Một nhịp scheduler bơm. Gọi thường xuyên từ loop() và từ vòng lặp portal; tự giới hạn
 // tối đa 1 tick / 1000 ms. Tự lấy g_lock. Đồng hồ không dùng được (!g_clockValid hoặc đọc
-// DS3231 lỗi — ruling R4) ⇒ tắt bơm và bỏ tick.
+// DS3231 lỗi — ruling R4) ⇒ tắt bơm, kết thúc phiên đang chạy (Scheduler::abort, có event
+// và tính là một lần tắt) và bỏ tick.
 void schedulerTick();
+
+// Gọi ngay trước mọi lần chủ động restart (ESP.restart()): kết thúc phiên đang chạy
+// (event + lastStop ghi xuống EEPROM) rồi tắt bơm. Tự lấy g_lock.
+void stopPumpForRestart();
 
 // RAII: lấy g_lock trong phạm vi khối.
 class SharedLock {

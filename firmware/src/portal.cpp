@@ -87,7 +87,7 @@ void sendForm(int code, const char* error, const String& ssid, const String& url
     appendEscaped(b, url);
     b += F("\"><label for=\"token\">Token</label>"
            "<input id=\"token\" name=\"token\" type=\"password\" maxlength=\"64\"");
-    if (hasOld) b += F(" placeholder=\"để trống = giữ token cũ\"");
+    b += hasOld ? F(" placeholder=\"để trống = giữ token cũ\"") : F(" required");
     b += F("><button type=\"submit\">Lưu &amp; khởi động lại</button></form>"
            "<p class=\"hint\">Server URL bắt buộc bắt đầu bằng https://</p>");
     sendPage(code, b);
@@ -133,6 +133,12 @@ void handleSave() {
         error = "Server URL quá dài (tối đa 199 byte).";
     } else if (token.length() >= sizeof cfg.token) {
         error = "Token quá dài (tối đa 64 byte).";
+    } else if (!s_current && token.length() == 0) {
+        error = "Chưa điền Token.";
+    } else if (s_current && token.length() == 0 && url != s_current->url) {
+        // AP không mật khẩu: không cho đổi URL mà giữ token cũ — tránh bị trỏ sang server lạ
+        // để thiết bị gửi token cũ đi.
+        error = "Đổi Server URL thì phải nhập lại Token.";
     }
     if (error) {
         Serial.printf("[portal] form lỗi: %s\n", error);
@@ -218,11 +224,13 @@ void run(const NetConfig* current) {
         schedulerTick();
 
         if (s_restartPending && (int32_t)(millis() - s_restartAt) >= 0) {
+            stopPumpForRestart();
             ESP.restart();
         }
         if (current && !s_restartPending && millis() - start >= kIdleTimeoutMs) {
             Serial.println("[portal] 10 phút không lưu, khởi động lại với cấu hình cũ");
-            delay(100);
+            stopPumpForRestart();
+            delay(100);  // cho Serial in xong
             ESP.restart();
         }
         delay(2);

@@ -8,6 +8,7 @@ constexpr uint16_t kHeaderLen = 6;
 constexpr uint16_t kLastStopAddr = 0x0008;
 constexpr uint16_t kRecordsAddr = 0x0010;
 constexpr uint16_t kRecordLen = 10;
+constexpr int kHeaderReadAttempts = 3;
 
 void put16(uint8_t* p, uint16_t v) {
     p[0] = (uint8_t)(v & 0xFF);
@@ -36,10 +37,17 @@ EventQueue::EventQueue(IStorage& s) : storage_(s) {}
 void EventQueue::begin() {
     // Header (0x00..0x05) + 2 byte đệm + lastStop (0x08..0x0B): đọc một lần.
     uint8_t buf[12];
-    if (!storage_.read(kHeaderAddr, buf, sizeof(buf))) {
-        format();
-        return;
+    head_ = 0;
+    count_ = 0;
+    lastStop_ = 0;
+    available_ = false;
+    bool readOk = false;
+    for (int i = 0; i < kHeaderReadAttempts && !readOk; i++) {
+        readOk = storage_.read(kHeaderAddr, buf, sizeof(buf));
     }
+    // Đọc lỗi mãi ⇒ không biết storage chứa gì: không format, để queue "unavailable".
+    if (!readOk) return;
+    available_ = true;
     uint16_t magic = get16(buf);
     uint16_t head = get16(buf + 2);
     uint16_t count = get16(buf + 4);
@@ -71,6 +79,7 @@ void EventQueue::writeHeader() {
 }
 
 void EventQueue::push(const Event& e) {
+    if (!available_) return;
     uint16_t slot = (uint16_t)((head_ + count_) % kQueueCapacity);
     uint8_t rec[kRecordLen];
     put32(rec, e.start);
@@ -83,6 +92,7 @@ void EventQueue::push(const Event& e) {
     } else {
         // Đầy: slot vừa ghi chính là record cũ nhất ⇒ dời head.
         head_ = (uint16_t)((head_ + 1) % kQueueCapacity);
+        dropped_++;
     }
     writeHeader();
 }
@@ -102,7 +112,7 @@ uint16_t EventQueue::peek(Event* out, uint16_t max) const {
 }
 
 void EventQueue::pop(uint16_t n) {
-    if (n == 0) return;
+    if (!available_ || n == 0) return;
     if (n >= count_) {
         head_ = 0;
         count_ = 0;
@@ -113,11 +123,17 @@ void EventQueue::pop(uint16_t n) {
     writeHeader();
 }
 
+void EventQueue::popSent(uint16_t sent, uint32_t droppedAtPeek) {
+    const uint32_t lost = dropped_ - droppedAtPeek;
+    pop(lost >= sent ? 0 : (uint16_t)(sent - lost));
+}
+
 uint16_t EventQueue::count() const { return count_; }
 
 uint32_t EventQueue::lastStop() const { return lastStop_; }
 
 void EventQueue::setLastStop(uint32_t v) {
+    if (!available_) return;
     lastStop_ = v;
     uint8_t buf[4];
     put32(buf, v);

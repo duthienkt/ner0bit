@@ -21,6 +21,10 @@ public:
     void setLastStop(uint32_t local);  // nạp từ EEPROM lúc boot, 0 = chưa từng
     bool hasSchedule() const { return hasSchedule_; }
     TickResult tick(uint32_t nowLocal, uint32_t monoSec);  // gọi ~1 lần/giây
+    // Kết thúc phiên đang chạy mà không cần giờ thực (đồng hồ lỗi, sắp restart): event stop =
+    // startActual + thời gian monotonic đã chạy (tối đa duration phiên); tính là một lần tắt
+    // (quy tắc nghỉ, lastStop). Mốc của phiên đã xử lý ⇒ không chạy lại. Không chạy ⇒ không làm gì.
+    TickResult abort(uint32_t monoSec);
 
 private:
     Schedule sched_{};
