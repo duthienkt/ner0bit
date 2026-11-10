@@ -4,6 +4,8 @@ Ngày chốt: 2026-11-10 · Trạng thái: đã duyệt, chờ linh kiện
 
 Cập nhật 2026-11-10: chốt cách vào chế độ cấu hình (reboot + nút BOOT, không tự mở khi mất WiFi), token xác thực, TLS dùng CA bundle, phân biệt dòng 2 rỗng/thiếu, quy tắc bỏ mốc/tưới bù, trường `capped`/`skipped`, nơi lưu trữ, hệ thống 1 thiết bị.
 
+Cập nhật 2026-11-10 (firmware): TLS dùng `setCACert()` với PEM nối 7 root thay cho `setCACertBundle()`; thêm bảng gán chân tạm.
+
 ## Tổng quan
 
 Hệ thống 2 phần:
@@ -30,6 +32,16 @@ Sơ đồ nối chân chi tiết vẽ bổ sung khi có linh kiện. Ràng buộ
 - Gate MOSFET: điện trở kéo xuống ~100 kΩ (gate → GND) để bơm **không tự bật** khi ESP đang boot/reset (chân GPIO thả nổi), cộng điện trở nối tiếp ~100 Ω.
 - Chân điều khiển bơm **không dùng GPIO2/8/9** (chân strapping; GPIO8 còn là LED, GPIO9 là nút BOOT).
 
+Gán chân **tạm** (firmware đang dùng, gom trong `firmware/src/pins.h`) — chỉ chốt khi có sơ đồ nối chân:
+
+| Chức năng | GPIO | Ghi chú |
+|---|---|---|
+| Gate MOSFET bơm (`PUMP_PIN`) | 4 | HIGH = bơm chạy; firmware kéo LOW ngay đầu `setup()` |
+| I2C SDA (`I2C_SDA`) | 5 | DS3231 `0x68` + AT24C32 `0x57`, 100 kHz |
+| I2C SCL (`I2C_SCL`) | 6 | |
+| LED onboard (`LED_PIN`) | 8 | Active-LOW; nháy nhanh trong cửa sổ BOOT, sáng liên tục khi ở chế độ cấu hình |
+| Nút BOOT (`BOOT_BUTTON_PIN`) | 9 | Active-LOW, `INPUT_PULLUP` |
+
 ## Setup / cấu hình WiFi
 
 Vào chế độ cấu hình khi:
@@ -43,7 +55,9 @@ Vào chế độ cấu hình khi:
 Quy trình:
 
 1. ESP phát WiFi `Ner0bit-Setup` (AP mode, **không mật khẩu**), captive portal tại `192.168.4.1`.
-2. Form điền: WiFi SSID, WiFi password, **Server URL** (bắt buộc `https://`), **Token**.
+2. Form điền: WiFi SSID, WiFi password, **Server URL** (`https://`, hoặc `http://` khi thử/demo), **Token**.
+   - Lần setup đầu (chưa có cấu hình) **bắt buộc điền Token**.
+   - Đã có cấu hình: để trống password/Token ⇒ giữ giá trị cũ. Nhưng **đổi Server URL thì phải nhập lại Token** (AP không mật khẩu — không cho ai đó trỏ thiết bị sang server lạ để nhận token cũ).
 3. Lưu vào NVS, khởi động lại, nối WiFi nhà.
 
 Scheduler bơm vẫn chạy bình thường trong lúc ở chế độ cấu hình. Nếu đã có cấu hình cũ mà 10 phút không ai lưu form ⇒ tự reboot về chế độ thường với cấu hình cũ (tránh AP mở mãi khi lỡ vào setup).
@@ -91,7 +105,7 @@ Authorization: Bearer <Token>
   - Nhận **HTTP 200** ⇒ ESP xoá các events vừa gửi khỏi queue (kể cả khi lịch trong body parse lỗi). Status khác / timeout ⇒ giữ nguyên, gửi lại lần sau.
 - `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (phiên chạy khi lần fetch gần nhất bị lỗi — mất mạng / server lỗi — dù lịch cache đang dùng là dòng 1 hay dòng 2).
 - `capped`: chỉ có (và = `true`) khi phiên bị cắt bởi hard-cap 30 phút.
-- `skipped`: mốc tới giờ nhưng **không bật bơm**; event này không có `stop`. Giá trị hiện có: `"rest"` (vi phạm thời gian nghỉ 10 phút).
+- `skipped`: mốc tới giờ nhưng **không bật bơm**; event này không có `stop`. Giá trị hiện có: `"rest"` (vi phạm thời gian nghỉ 10 phút) | `"busy"` (mốc tới giờ khi bơm đang chạy phiên khác).
 
 **Response** (HTTP 200, `text/plain`) là lịch tưới, đúng 2 dòng:
 
@@ -121,13 +135,18 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 - Mỗi dòng tối đa **20 mốc**, nhận theo thứ tự xuất hiện, phần dư bỏ.
 - Entry sai bị **bỏ lẻ**, không văng cả file: token không phải số, giây ≥ 86400, hoặc duration = 0.
 - Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (PHP không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
-- HTTPS qua `WiFiClientSecure` (TLS), timeout request 10 giây; network chạy trong FreeRTOS task riêng, không được chặn scheduler bơm (1 giây/lần).
+- Request gửi bằng **HTTP/1.0** (`Connection: close`) nên response không chunked; ESP đọc body thẳng vào buffer cố định, body lịch tối đa **1023 byte** (dài hơn ⇒ coi như lịch lỗi, giữ cache).
+- HTTPS qua `WiFiClientSecure` (TLS). Timeout 10 giây **cho từng pha** (kết nối TCP, bắt tay TLS, đọc response) — một request xấu nhất có thể kéo dài vài chục giây, nhưng không bao giờ chặn scheduler bơm (1 giây/lần) vì network chạy trong FreeRTOS task riêng.
 
 ### TLS
 
 - Server public qua **Cloudflare Tunnel** hoặc chứng chỉ **Let's Encrypt** (chưa chốt cái nào).
-- ESP **kiểm tra chứng chỉ** bằng CA bundle nhúng trong firmware (`WiFiClientSecure::setCACertBundle()`), **không** pin một root CA đơn lẻ và **không** `setInsecure()`. Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Bundle dùng được cho cả hai phương án, tốn vài chục KB flash.
-- Không hỗ trợ `http://` (token đi trong header).
+- ESP **kiểm tra chứng chỉ** bằng nhiều root CA nhúng trong firmware: `WiFiClientSecure::setCACert()` với **một chuỗi PEM nối 7 root** (`firmware/src/ca_bundle.cpp`), **không** pin một root CA đơn lẻ và **không** `setInsecure()`. 7 root:
+  - ISRG Root X1, ISRG Root X2 (Let's Encrypt)
+  - GTS Root R1, GTS Root R3, GTS Root R4 (Google Trust Services)
+  - SSL.com Root Certification Authority RSA, SSL.com Root Certification Authority ECC
+- Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Danh sách 7 root dùng được cho cả hai phương án, chỉ tốn ~10 KB flash (nhẹ hơn nhúng cả CA bundle Mozilla qua `setCACertBundle()`). Cập nhật danh sách: nối lại các file PEM như ghi chú đầu `ca_bundle.cpp` rồi build lại.
+- `http://` được chấp nhận **chỉ để thử/demo** (vd. server PHP chạy trong LAN): dùng `WiFiClient` thường, không mã hoá. Token, lịch tưới và header `Date` đi dạng rõ — ai cùng mạng cũng đọc được token, sửa được lịch và giờ. Portal và Serial log đều cảnh báo. Triển khai thật luôn dùng `https://`.
 
 ## Scheduler & an toàn bơm
 
@@ -137,6 +156,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
   - Mốc tới giờ mà chưa nghỉ đủ 10 phút ⇒ **bỏ mốc** (không hoãn), ghi event `"skipped": "rest"`.
   - Thời điểm tắt bơm gần nhất lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot.
 - **Phiên đang chạy luôn chạy nốt** theo duration lúc bắt đầu, kể cả khi lịch mới về giữa chừng hoặc qua 0h00.
+- Mốc tới giờ khi bơm đang chạy phiên khác ⇒ **bỏ mốc** (phiên đang chạy không kéo dài), ghi event `"skipped": "busy"`.
 - **Tưới bù**: khi boot hoặc khi nhận lịch mới, nếu thời điểm hiện tại nằm trong khung `[mốc, mốc + duration)` của một mốc và bơm đang tắt ⇒ bật cho **phần thời gian còn lại** (vẫn qua quy tắc nghỉ và hard-cap). Mốc đã qua hẳn khung ⇒ không bù.
   - Vd. mất điện lúc 07:03 giữa phiên 07:00–07:05, có điện lại 07:04 ⇒ tưới tiếp 1 phút. (Tắt do mất điện không ghi "thời điểm tắt bơm", nên quy tắc nghỉ không chặn phần bù này.)
   - Phần phiên trước khi mất điện không có event (event chỉ ghi lúc phiên kết thúc) — chấp nhận.
@@ -144,8 +164,16 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 
 ## Đồng bộ thời gian
 
-- Có mạng: NTP (múi UTC+7), định kỳ hiệu chỉnh DS3231.
+- Có mạng: header **`Date`** của heartbeat HTTPS (mỗi 300 s) là nguồn giờ chính; NTP (mỗi 6 giờ) chỉ tinh chỉnh. Giờ hiển thị/lịch theo UTC+7.
 - Mất mạng: tin DS3231 (pin onboard giữ giờ).
+- **NTP không xác thực** — ai giả được gói NTP trong LAN là xê dịch được đồng hồ (bơm tưới sai giờ). Kể cả chỉ cho NTP chỉnh từng bước nhỏ (vd. ≤ 300 s) thì kẻ tấn công vẫn dời được đồng hồ không giới hạn: mỗi lần sync (6 giờ một lần, và mỗi lần reboot) đẩy thêm 299 s. Nên mọi giờ ghi vào DS3231 đều qua `TimeTrust` (`firmware/lib/core/time_trust.*`), với *neo* là header `Date` đã được TLS xác thực:
+  1. **Header `Date` là nguồn tin cậy.** Mỗi response **200** qua HTTPS có `Date` hợp lệ: tính `dateNow = Date + (monoSec() lúc này − monoSec() lúc nhận response)`. Đồng hồ chưa hợp lệ (DS3231 mất nguồn — cờ OSF, chưa từng chỉnh, hoặc đọc lỗi) hoặc |DS3231 − dateNow| > **5 s** ⇒ ghi DS3231 = dateNow, đồng hồ hợp lệ. Lệch ≤ 5 s ⇒ không ghi. Cả hai trường hợp đều lưu *neo* (`Date`, `monoSec()` lúc nhận response). Response không có `Date` hợp lệ ⇒ bỏ qua, neo cũ giữ nguyên.
+  2. **Có neo (chưa quá 24 giờ)** ⇒ chỉ nhận NTP khi |NTP − (giờ neo + thời gian monotonic đã trôi từ lúc neo)| ≤ **5 s**; lệch hơn ⇒ bỏ, ghi log (có thể bị giả mạo). Lúc này DS3231 không được xét: NTP chỉ còn tác dụng tinh chỉnh dưới 5 s, không bao giờ kéo đồng hồ ra xa giờ đã xác thực quá 5 s.
+  3. **Chưa có neo** (vừa boot, hoặc server không tới được, hoặc neo đã quá 24 giờ) ⇒ chỉ nhận NTP khi đồng hồ chưa hợp lệ (bootstrap — chưa có giờ nào tốt hơn) hoặc |NTP − DS3231| ≤ **5 s**. NTP lệch lớn **không bao giờ** ghi đè một DS3231 đang hợp lệ: ESP bỏ giờ NTP đó, heartbeat ngay, và chờ header `Date` phân xử (DS3231 sai thật thì quy tắc 1 chỉnh lại).
+  4. Giờ NTP hoặc `Date` < 2026-01-01 hoặc ≥ **2100-01-01** (4102444800) ⇒ vô lý, bỏ (`Date` vô lý không đổi neo).
+- Server **phải gửi header `Date` đúng giờ** — DS3231 được chỉnh theo nó mỗi khi lệch quá 5 s. Web server và Cloudflare đều tự gửi header này theo chuẩn; server chỉ cần đồng bộ giờ hệ thống (NTP phía server).
+- Header `Date` phải theo dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — PHP/nginx/Apache/Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
+- Giờ hệ thống của ESP (`time()`) vẫn do SNTP đặt, nhưng không dùng cho scheduler (chỉ DS3231) và không ảnh hưởng TLS: mbedTLS của Arduino-ESP32 build không bật `MBEDTLS_HAVE_TIME_DATE` nên không kiểm hạn chứng chỉ.
 
 ## Failsafe
 
