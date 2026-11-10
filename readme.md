@@ -9,7 +9,7 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 - Mỗi lần bật/tắt bơm hoặc bỏ mốc là một event (`start` / `stop` / `skipped`), gửi lên server ~3 giây sau khi xảy ra. Heartbeat kèm heap trống, trạng thái module, nhiệt độ DS3231.
 - Module DS3231 + AT24C32 **tuỳ chọn**: có module thì giữ giờ qua mất điện khi không có mạng, queue events và lịch cache nằm trên EEPROM; không có thì queue events nằm trong RAM, lịch cache trong NVS — mất điện lúc không có mạng thì chờ có mạng lại mới tưới.
 - Failsafe: mất internet vẫn tưới theo lịch cache lần fetch cuối; events gửi bù khi có mạng lại.
-- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, sau đó giữ nút BOOT ≥ 3 giây trong 5 giây đầu sau khi boot. Mất WiFi không tự mở hotspot.
+- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, trong 5 giây đầu (LED chớp nhanh) bắt đầu nhấn BOOT và giữ 3 giây (LED sáng liên tục khi đang giữ); hoặc gõ `setup` trong `pio device monitor`. Mất WiFi không tự mở hotspot.
 - Hệ thống 1 thiết bị, 1 server; heartbeat xác thực bằng token.
 - An toàn bơm: hard-cap 30 phút/phiên, nghỉ tối thiểu 3 phút giữa 2 lần bật.
 
