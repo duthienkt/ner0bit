@@ -14,7 +14,7 @@
 extern SemaphoreHandle_t g_lock;
 extern EventQueue g_queue;  // trên AT24C32; main gọi g_queue.begin() sau Wire.begin()
 extern Scheduler g_sched;
-extern volatile bool g_clockValid;  // DS3231 không mất nguồn, hoặc đã chỉnh theo NTP
+extern volatile bool g_clockValid;  // DS3231 không mất nguồn, hoặc đã chỉnh theo Date/NTP
 
 constexpr uint32_t kUtcOffset = 25200;  // UTC+7
 // Kích thước buffer (kể cả '\0') cho body lịch: body dài hơn bị coi là lịch lỗi, không cache.

@@ -164,14 +164,15 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 
 ## Đồng bộ thời gian
 
-- Có mạng: NTP (múi UTC+7), định kỳ hiệu chỉnh DS3231.
+- Có mạng: header **`Date`** của heartbeat HTTPS (mỗi 300 s) là nguồn giờ chính; NTP (mỗi 6 giờ) chỉ tinh chỉnh. Giờ hiển thị/lịch theo UTC+7.
 - Mất mạng: tin DS3231 (pin onboard giữ giờ).
-- **NTP không xác thực** — ai giả được gói NTP trong LAN là xê dịch được đồng hồ (bơm tưới sai giờ). Nên ESP không ghi giờ NTP vào DS3231 một cách mù quáng (`TimeTrust`, `firmware/lib/core/time_trust.*`):
-  1. Giờ NTP < 2026-01-01 hoặc ≥ **2100-01-01** (4102444800) ⇒ vô lý, bỏ.
-  2. Đồng hồ chưa hợp lệ (DS3231 mất nguồn — cờ OSF, chưa từng chỉnh, hoặc đọc lỗi) ⇒ nhận NTP: ghi DS3231, đồng hồ hợp lệ.
-  3. Đồng hồ hợp lệ, |NTP − DS3231| ≤ **300 s** ⇒ nhận (hiệu chỉnh trôi bình thường).
-  4. Đồng hồ hợp lệ, lệch > 300 s ⇒ **không ghi** DS3231; giữ giờ NTP làm *ứng viên* (kèm mốc `monoSec()`) và heartbeat ngay. Ứng viên chỉ được xác nhận bằng header **`Date`** của một response **200** qua HTTPS sau đó (TLS xác thực server nên không giả được): nếu `Date` nằm trong ±300 s của ứng viên cộng thời gian monotonic đã trôi ⇒ ghi DS3231. Lệch hơn ⇒ bỏ ứng viên, ghi log, giữ nguyên DS3231. Response không có `Date` hợp lệ ⇒ ứng viên tiếp tục chờ; NTP mới lệch lớn thay ứng viên cũ, NTP khớp DS3231 xoá nó.
-- Server **phải gửi header `Date`** dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — PHP/nginx/Apache/Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
+- **NTP không xác thực** — ai giả được gói NTP trong LAN là xê dịch được đồng hồ (bơm tưới sai giờ). Kể cả chỉ cho NTP chỉnh từng bước nhỏ (vd. ≤ 300 s) thì kẻ tấn công vẫn dời được đồng hồ không giới hạn: mỗi lần sync (6 giờ một lần, và mỗi lần reboot) đẩy thêm 299 s. Nên mọi giờ ghi vào DS3231 đều qua `TimeTrust` (`firmware/lib/core/time_trust.*`), với *neo* là header `Date` đã được TLS xác thực:
+  1. **Header `Date` là nguồn tin cậy.** Mỗi response **200** qua HTTPS có `Date` hợp lệ: tính `dateNow = Date + (monoSec() lúc này − monoSec() lúc nhận response)`. Đồng hồ chưa hợp lệ (DS3231 mất nguồn — cờ OSF, chưa từng chỉnh, hoặc đọc lỗi) hoặc |DS3231 − dateNow| > **5 s** ⇒ ghi DS3231 = dateNow, đồng hồ hợp lệ. Lệch ≤ 5 s ⇒ không ghi. Cả hai trường hợp đều lưu *neo* (`Date`, `monoSec()` lúc nhận response). Response không có `Date` hợp lệ ⇒ bỏ qua, neo cũ giữ nguyên.
+  2. **Có neo (chưa quá 24 giờ)** ⇒ chỉ nhận NTP khi |NTP − (giờ neo + thời gian monotonic đã trôi từ lúc neo)| ≤ **5 s**; lệch hơn ⇒ bỏ, ghi log (có thể bị giả mạo). Lúc này DS3231 không được xét: NTP chỉ còn tác dụng tinh chỉnh dưới 5 s, không bao giờ kéo đồng hồ ra xa giờ đã xác thực quá 5 s.
+  3. **Chưa có neo** (vừa boot, hoặc server không tới được, hoặc neo đã quá 24 giờ) ⇒ chỉ nhận NTP khi đồng hồ chưa hợp lệ (bootstrap — chưa có giờ nào tốt hơn) hoặc |NTP − DS3231| ≤ **5 s**. NTP lệch lớn **không bao giờ** ghi đè một DS3231 đang hợp lệ: ESP bỏ giờ NTP đó, heartbeat ngay, và chờ header `Date` phân xử (DS3231 sai thật thì quy tắc 1 chỉnh lại).
+  4. Giờ NTP hoặc `Date` < 2026-01-01 hoặc ≥ **2100-01-01** (4102444800) ⇒ vô lý, bỏ (`Date` vô lý không đổi neo).
+- Server **phải gửi header `Date` đúng giờ** — DS3231 được chỉnh theo nó mỗi khi lệch quá 5 s. Web server và Cloudflare đều tự gửi header này theo chuẩn; server chỉ cần đồng bộ giờ hệ thống (NTP phía server).
+- Header `Date` phải theo dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — PHP/nginx/Apache/Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
 - Giờ hệ thống của ESP (`time()`) vẫn do SNTP đặt, nhưng không dùng cho scheduler (chỉ DS3231) và không ảnh hưởng TLS: mbedTLS của Arduino-ESP32 build không bật `MBEDTLS_HAVE_TIME_DATE` nên không kiểm hạn chứng chỉ.
 
 ## Failsafe
