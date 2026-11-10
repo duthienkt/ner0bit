@@ -142,6 +142,19 @@ void test_max_events_fits_buf_size() {
     TEST_ASSERT_EQUAL_INT(kMaxEventsPerHeartbeat, countOccurrences(buf, "\"start\":\"2106-02-07T06:28:15+07:00\""));
 }
 
+void test_skipped_busy() {
+    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 1, -58, true, 1794323100};
+    Event e = ev(kDay + 7 * 3600 + 5 * 60, 0, Source::Normal, kSkippedBusy);
+    char buf[512];
+    size_t n = buildHeartbeat(buf, sizeof(buf), h, &e, 1);
+    const char* expected =
+        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":1,\"rssi\":-58,"
+        "\"pump_on\":true,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":["
+        "{\"start\":\"2026-11-10T07:05:00+07:00\",\"source\":\"normal\",\"skipped\":\"busy\"}]}";
+    TEST_ASSERT_EQUAL_STRING(expected, buf);
+    TEST_ASSERT_EQUAL_UINT32(strlen(expected), n);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_format_iso);
@@ -152,5 +165,6 @@ int main(int, char**) {
     RUN_TEST(test_buffer_too_small_returns_0);
     RUN_TEST(test_buffer_exact_fit_boundary);
     RUN_TEST(test_max_events_fits_buf_size);
+    RUN_TEST(test_skipped_busy);
     return UNITY_END();
 }

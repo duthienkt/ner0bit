@@ -32,6 +32,16 @@ private:
     bool haveRunStop_ = false;  // đã có lần tắt trong lần chạy này (RAM)
     uint32_t monoLastStop_ = 0;
 
+    struct Candidate {
+        uint32_t start;
+        uint32_t cap;
+        Source src;
+        bool capped;
+    };
+    // Mốc có absStart sớm nhất trong (handledUpTo_, now] của hôm qua/hôm nay;
+    // requireOpen ⇒ chỉ xét mốc còn trong khung [absStart, absStart + cap).
+    bool findDue(uint32_t now, bool requireOpen, Candidate& best) const;
+
     // Chọn dòng áp dụng cho ngày `day`; nullptr nếu ngày đó không có mốc nào.
     const Line* lineForDay(uint32_t day, Source& src) const;
     bool restViolated(uint32_t now, uint32_t mono) const;

@@ -83,8 +83,9 @@ size_t buildHeartbeat(char* buf, size_t cap, const HeartbeatInfo& h, const Event
         const Event& e = ev[i];
         formatIsoLocal(e.start, ts);
         const char* sep = i ? "," : "";
-        if (e.flags & kSkippedRest) {
-            w.add("%s{\"start\":\"%s\",\"source\":\"%s\",\"skipped\":\"rest\"}", sep, ts, sourceName(e.source));
+        if (e.flags & (kSkippedRest | kSkippedBusy)) {
+            w.add("%s{\"start\":\"%s\",\"source\":\"%s\",\"skipped\":\"%s\"}", sep, ts, sourceName(e.source),
+                  (e.flags & kSkippedBusy) ? "busy" : "rest");
         } else {
             formatIsoLocal(e.stop, ts2);
             w.add("%s{\"start\":\"%s\",\"stop\":\"%s\",\"source\":\"%s\"%s}", sep, ts, ts2, sourceName(e.source),

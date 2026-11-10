@@ -91,7 +91,7 @@ Authorization: Bearer <Token>
   - Nhận **HTTP 200** ⇒ ESP xoá các events vừa gửi khỏi queue (kể cả khi lịch trong body parse lỗi). Status khác / timeout ⇒ giữ nguyên, gửi lại lần sau.
 - `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (phiên chạy khi lần fetch gần nhất bị lỗi — mất mạng / server lỗi — dù lịch cache đang dùng là dòng 1 hay dòng 2).
 - `capped`: chỉ có (và = `true`) khi phiên bị cắt bởi hard-cap 30 phút.
-- `skipped`: mốc tới giờ nhưng **không bật bơm**; event này không có `stop`. Giá trị hiện có: `"rest"` (vi phạm thời gian nghỉ 10 phút).
+- `skipped`: mốc tới giờ nhưng **không bật bơm**; event này không có `stop`. Giá trị hiện có: `"rest"` (vi phạm thời gian nghỉ 10 phút) | `"busy"` (mốc tới giờ khi bơm đang chạy phiên khác).
 
 **Response** (HTTP 200, `text/plain`) là lịch tưới, đúng 2 dòng:
 
@@ -137,6 +137,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
   - Mốc tới giờ mà chưa nghỉ đủ 10 phút ⇒ **bỏ mốc** (không hoãn), ghi event `"skipped": "rest"`.
   - Thời điểm tắt bơm gần nhất lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot.
 - **Phiên đang chạy luôn chạy nốt** theo duration lúc bắt đầu, kể cả khi lịch mới về giữa chừng hoặc qua 0h00.
+- Mốc tới giờ khi bơm đang chạy phiên khác ⇒ **bỏ mốc** (phiên đang chạy không kéo dài), ghi event `"skipped": "busy"`.
 - **Tưới bù**: khi boot hoặc khi nhận lịch mới, nếu thời điểm hiện tại nằm trong khung `[mốc, mốc + duration)` của một mốc và bơm đang tắt ⇒ bật cho **phần thời gian còn lại** (vẫn qua quy tắc nghỉ và hard-cap). Mốc đã qua hẳn khung ⇒ không bù.
   - Vd. mất điện lúc 07:03 giữa phiên 07:00–07:05, có điện lại 07:04 ⇒ tưới tiếp 1 phút. (Tắt do mất điện không ghi "thời điểm tắt bơm", nên quy tắc nghỉ không chặn phần bù này.)
   - Phần phiên trước khi mất điện không có event (event chỉ ghi lúc phiên kết thúc) — chấp nhận.

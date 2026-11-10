@@ -270,6 +270,135 @@ void test_earliest_open_window_wins() {
     expectEvent(r, T(D, 7, 6, 0), T(D, 7, 30, 0), Source::Normal, 0);
 }
 
+void test_midnight_catchup_uses_yesterday_line2() {
+    // Hôm qua (D) là fetchDay ⇒ mốc 23:55 của hôm qua lấy từ dòng 2.
+    Scheduler s;
+    s.setSchedule(sch("25200\n86100:600"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D + 1, 0, 2, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    r = s.tick(T(D + 1, 0, 4, 59), 179);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D + 1, 0, 5, 0), 180);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D + 1, 0, 2, 0), T(D + 1, 0, 5, 0), Source::Today, 0);
+}
+
+void test_midnight_catchup_yesterday_empty_line2() {
+    // Dòng 2 rỗng cho hôm qua (fetchDay D) ⇒ hôm qua không tưới, không bù qua 0h.
+    Scheduler s;
+    s.setSchedule(sch("86100:600\n"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D + 1, 0, 2, 0), 0);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+}
+
+void test_midnight_catchup_yesterday_line1_when_fetched_today() {
+    // fetchDay = D+1 ⇒ dòng 2 rỗng chỉ áp dụng hôm nay; hôm qua dùng dòng 1.
+    Scheduler s;
+    s.setSchedule(sch("86100:600\n"), D + 1);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D + 1, 0, 2, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D + 1, 0, 5, 0), 180);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D + 1, 0, 2, 0), T(D + 1, 0, 5, 0), Source::Normal, 0);
+}
+
+void test_rest_uses_monotonic_on_forward_clock_jump() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300,26400:300"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 5, 0), 300);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
+    r = s.tick(T(D, 7, 20, 30), 301);  // đồng hồ nhảy tới; thực tế mới nghỉ 1s
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 20, 0), 0, Source::Normal, kSkippedRest);
+}
+
+void test_entry_due_while_busy_is_skipped() {
+    Scheduler s;
+    s.setSchedule(sch("25200:600,25500:120"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 4, 59), 299);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    r = s.tick(T(D, 7, 5, 0), 300);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    expectEvent(r, T(D, 7, 5, 0), 0, Source::Normal, kSkippedBusy);
+    TEST_ASSERT_FALSE(r.lastStopChanged);
+    for (uint32_t sec = 301; sec < 600; sec++) {
+        r = s.tick(T(D, 7, 0, 0) + sec, sec);
+        TEST_ASSERT_TRUE(r.pumpOn);
+        TEST_ASSERT_FALSE(r.hasEvent);
+    }
+    r = s.tick(T(D, 7, 10, 0), 600);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 10, 0), Source::Normal, 0);
+    r = s.tick(T(D, 7, 10, 1), 601);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+}
+
+void test_busy_skips_one_event_per_tick_in_order() {
+    // Hai mốc cùng tới giờ khi đang chạy ⇒ hai tick liên tiếp, mốc sớm trước.
+    Scheduler s;
+    s.setSchedule(sch("25200:900,25560:60,25500:60"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 6, 0), 360);  // mốc 07:05 và 07:06 đều đã tới
+    TEST_ASSERT_TRUE(r.pumpOn);
+    expectEvent(r, T(D, 7, 5, 0), 0, Source::Normal, kSkippedBusy);
+    r = s.tick(T(D, 7, 6, 1), 361);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    expectEvent(r, T(D, 7, 6, 0), 0, Source::Normal, kSkippedBusy);
+    r = s.tick(T(D, 7, 6, 2), 362);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+}
+
+void test_stop_event_has_priority_over_busy() {
+    // Mốc 2 tới giờ đúng tick phiên 1 kết thúc ⇒ tick đó phát STOP; tick sau mốc 2 bị skipped rest.
+    Scheduler s;
+    s.setSchedule(sch("25200:300,25500:300"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 5, 0), 300);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
+    r = s.tick(T(D, 7, 5, 1), 301);
+    expectEvent(r, T(D, 7, 5, 0), 0, Source::Normal, kSkippedRest);
+}
+
+void test_large_backward_clock_jump_unblocks_entries() {
+    // RTC chạy trước 3 ngày, NTP chỉnh về đúng ⇒ mốc hôm nay vẫn chạy.
+    Scheduler s;
+    s.setSchedule(sch("25200:300"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D + 3, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D + 3, 7, 5, 0), 300);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_TRUE(r.hasEvent);
+    r = s.tick(T(D, 6, 59, 0), 1000);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_FALSE(r.hasEvent);
+    r = s.tick(T(D, 7, 0, 0), 1060);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 5, 0), 1360);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), T(D, 7, 5, 0), Source::Normal, 0);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_starts_at_entry_and_stops_after_duration);
@@ -290,5 +419,13 @@ int main() {
     RUN_TEST(test_rest_boundary_599_600);
     RUN_TEST(test_resume_across_midnight);
     RUN_TEST(test_earliest_open_window_wins);
+    RUN_TEST(test_midnight_catchup_uses_yesterday_line2);
+    RUN_TEST(test_midnight_catchup_yesterday_empty_line2);
+    RUN_TEST(test_midnight_catchup_yesterday_line1_when_fetched_today);
+    RUN_TEST(test_rest_uses_monotonic_on_forward_clock_jump);
+    RUN_TEST(test_entry_due_while_busy_is_skipped);
+    RUN_TEST(test_busy_skips_one_event_per_tick_in_order);
+    RUN_TEST(test_stop_event_has_priority_over_busy);
+    RUN_TEST(test_large_backward_clock_jump_unblocks_entries);
     return UNITY_END();
 }

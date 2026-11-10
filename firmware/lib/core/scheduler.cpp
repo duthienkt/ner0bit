@@ -13,6 +13,10 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
     TickResult r{};
     r.lastStop = lastStop_;
 
+    // Đồng hồ lùi xa (vd. RTC chạy trước vài ngày rồi NTP chỉnh lại): handledUpTo_ chỉ tiến,
+    // không kéo về thì mọi mốc bị chặn tới khi đồng hồ đuổi kịp.
+    if (now + 86400 < handledUpTo_) handledUpTo_ = now;
+
     if (running_) {
         if (now >= stopAt_ || (uint32_t)(mono - monoStart_) >= runDur_) {
             running_ = false;
@@ -23,21 +27,45 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
             r.event = Event{startActual_, now, runSource_, runFlags_};
             r.lastStopChanged = true;
             r.lastStop = now;
-        } else {
-            r.pumpOn = true;
+            return r;
+        }
+        r.pumpOn = true;
+        // Mốc tới giờ khi bơm đang chạy phiên khác ⇒ bỏ, báo "busy" (mỗi tick tối đa 1 event).
+        Candidate c;
+        if (hasSchedule_ && findDue(now, false, c)) {
+            handledUpTo_ = c.start;
+            r.hasEvent = true;
+            r.event = Event{c.start, 0, c.src, kSkippedBusy};
         }
         return r;
     }
 
     if (!hasSchedule_) return r;
 
+    Candidate c;
+    if (!findDue(now, true, c)) return r;
+
+    handledUpTo_ = c.start;
+    if (restViolated(now, mono)) {
+        r.hasEvent = true;
+        r.event = Event{c.start, 0, c.src, kSkippedRest};
+    } else {
+        running_ = true;
+        startActual_ = now;
+        stopAt_ = c.start + c.cap;
+        runDur_ = stopAt_ - now;
+        monoStart_ = mono;
+        runSource_ = c.src;
+        runFlags_ = c.capped ? kCapped : 0;
+        r.pumpOn = true;
+    }
+    return r;
+}
+
+bool Scheduler::findDue(uint32_t now, bool requireOpen, Candidate& best) const {
     const uint32_t today = now / 86400;
     bool found = false;
-    uint32_t bestStart = 0, bestCap = 0;
-    Source bestSrc = Source::Normal;
-    bool bestCapped = false;
-
-    // Hôm qua trước (absStart nhỏ hơn), rồi hôm nay; chọn absStart nhỏ nhất còn mở.
+    // Hôm qua (mốc qua 0h) và hôm nay; chọn absStart nhỏ nhất trong (handledUpTo_, now].
     for (int back = 1; back >= 0; back--) {
         if (back == 1 && today == 0) continue;
         const uint32_t day = today - back;
@@ -48,33 +76,17 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
             const Entry& e = line->e[i];
             const uint32_t absStart = day * 86400 + e.start;
             const uint32_t capDur = e.duration > kHardCap ? kHardCap : e.duration;
-            if (!(absStart <= now && now < absStart + capDur)) continue;
-            if (absStart <= handledUpTo_) continue;
-            if (found && absStart >= bestStart) continue;
+            if (absStart > now || absStart <= handledUpTo_) continue;
+            if (requireOpen && now >= absStart + capDur) continue;
+            if (found && absStart >= best.start) continue;
             found = true;
-            bestStart = absStart;
-            bestCap = capDur;
-            bestSrc = src;
-            bestCapped = e.duration > kHardCap;
+            best.start = absStart;
+            best.cap = capDur;
+            best.src = src;
+            best.capped = e.duration > kHardCap;
         }
     }
-    if (!found) return r;
-
-    handledUpTo_ = bestStart;
-    if (restViolated(now, mono)) {
-        r.hasEvent = true;
-        r.event = Event{bestStart, 0, bestSrc, kSkippedRest};
-    } else {
-        running_ = true;
-        startActual_ = now;
-        stopAt_ = bestStart + bestCap;
-        runDur_ = stopAt_ - now;
-        monoStart_ = mono;
-        runSource_ = bestSrc;
-        runFlags_ = bestCapped ? kCapped : 0;
-        r.pumpOn = true;
-    }
-    return r;
+    return found;
 }
 
 const Line* Scheduler::lineForDay(uint32_t day, Source& src) const {
