@@ -43,7 +43,7 @@ const (
 
 	loginWindow      = 10 * time.Minute
 	maxLoginFailures = 5     // sai đủ số lần này trong cửa sổ ⇒ 429 tới hết cửa sổ
-	maxLoginIPs      = 10000 // chặn map phình vô hạn; đầy ⇒ IP mới bị 429
+	maxLoginIPs      = 10000 // chặn map phình vô hạn; đầy ⇒ bỏ mục cũ nhất
 
 	onlineWindow      = 15 * time.Minute // 3 lần heartbeat định kỳ (300 s)
 	defaultEventLimit = 100
@@ -146,7 +146,7 @@ func (s *Server) renderPage(w http.ResponseWriter, status int, data pageData) {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	now := s.now()
 	if until, blocked := s.loginBlocked(ip, now); blocked {
 		mins := int(until.Sub(now).Minutes()) + 1
@@ -209,9 +209,6 @@ func (s *Server) loginBlocked(ip string, now time.Time) (time.Time, bool) {
 	}
 	f := s.loginFails[ip]
 	if f == nil {
-		if len(s.loginFails) >= maxLoginIPs {
-			return now.Add(loginWindow), true
-		}
 		return time.Time{}, false
 	}
 	return f.first.Add(loginWindow), f.count >= maxLoginFailures
@@ -225,16 +222,29 @@ func (s *Server) loginFailed(ip string, now time.Time) {
 	}
 	f := s.loginFails[ip]
 	if f == nil {
+		if len(s.loginFails) >= maxLoginIPs {
+			// Đầy ⇒ bỏ mục cũ nhất, không khoá mọi IP mới (tránh bị ép khoá cả chủ nhà).
+			var oldest string
+			for k, v := range s.loginFails {
+				if oldest == "" || v.first.Before(s.loginFails[oldest].first) {
+					oldest = k
+				}
+			}
+			delete(s.loginFails, oldest)
+		}
 		f = &loginFailures{first: now}
 		s.loginFails[ip] = f
 	}
 	f.count++
 }
 
-// clientIP: sau Cloudflare Tunnel, IP thật nằm ở CF-Connecting-IP.
-func clientIP(r *http.Request) string {
-	if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" {
-		return ip
+// clientIP: sau Cloudflare Tunnel (TrustCFHeader), IP thật nằm ở CF-Connecting-IP — Cloudflare ghi
+// đè header này nên client không giả được. Không bật ⇒ chỉ tin RemoteAddr.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.TrustCFHeader {
+		if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" {
+			return ip
+		}
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
@@ -376,7 +386,7 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Không ghi được schedule.json.")
 		return
 	}
-	log.Printf("UI: %s lưu lịch: daily=%q, %d ngày riêng", clientIP(r), sched.Daily, len(sched.Days))
+	log.Printf("UI: %s lưu lịch: daily=%q, %d ngày riêng", s.clientIP(r), sched.Daily, len(sched.Days))
 	writeJSON(w, http.StatusOK, sched)
 }
 

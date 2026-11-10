@@ -24,11 +24,15 @@ var vietnam = time.FixedZone("ICT", 7*3600)
 // Server xử lý POST heartbeat từ thiết bị (docs/system-design.md, "Interface ESP ↔ Server")
 // và giao diện web (ui.go).
 type Server struct {
-	Token      string           // so với header "Authorization: Bearer <token>"
-	DeviceID   string           // MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
-	DataDir    string           // chứa schedule.json, heartbeats.jsonl, events.jsonl
-	UIPassword string           // mật khẩu giao diện web; rỗng ⇒ tắt UI
-	Now        func() time.Time // nil ⇒ time.Now
+	Token      string // so với header "Authorization: Bearer <token>"
+	DeviceID   string // MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
+	DataDir    string // chứa schedule.json, heartbeats.jsonl, events.jsonl
+	UIPassword string // mật khẩu giao diện web; rỗng ⇒ tắt UI
+	// TrustCFHeader: lấy IP client từ header CF-Connecting-IP (giới hạn đăng nhập sai theo IP).
+	// Chỉ bật khi server CHỈ nhận request qua Cloudflare Tunnel — mở port trực tiếp thì client tự
+	// đặt được header này.
+	TrustCFHeader bool
+	Now           func() time.Time // nil ⇒ time.Now
 
 	mu sync.Mutex // tuần tự hoá ghi/đọc file log
 

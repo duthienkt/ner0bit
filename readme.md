@@ -86,7 +86,7 @@ Mở URL server bằng trình duyệt (điện thoại hoặc máy tính), đăn
 - "Tưới thử": thêm mốc 5 phút cho hôm nay sau N phút (mặc định 7) rồi lưu ngay. Thiết bị nhận lịch ở heartbeat kế tiếp (≤ 5 phút).
 - Hoạt động gần đây: bật/tắt/bỏ mốc, nguồn, lý do. Trang tự làm mới mỗi 15 giây.
 
-`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP, lấy `CF-Connecting-IP` nếu có) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
+`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP; `NER0BIT_TRUST_CF_HEADER=1` ⇒ lấy IP thật từ `CF-Connecting-IP` — chỉ bật khi server chỉ nhận request qua Cloudflare Tunnel) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
 
 Log: `data/heartbeats.jsonl`, `data/events.jsonl` (mỗi dòng một JSON). Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
 

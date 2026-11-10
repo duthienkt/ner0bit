@@ -173,6 +173,7 @@ func TestLoginRateLimit(t *testing.T) {
 
 func TestLoginRateLimitUsesCFConnectingIP(t *testing.T) {
 	s, _, _ := newUIServer(t, goodSchedule)
+	s.TrustCFHeader = true
 	// Sau Cloudflare Tunnel mọi request có cùng RemoteAddr; IP thật nằm ở CF-Connecting-IP.
 	tunnel := withRemote("127.0.0.1:5555")
 	for i := 0; i < 5; i++ {
@@ -591,5 +592,38 @@ func TestOtherPathsAndMethods(t *testing.T) {
 	}
 	if rec := do(s, http.MethodDelete, "/", ""); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE /: code %d, want 405", rec.Code)
+	}
+}
+
+// Không chạy sau Cloudflare (TrustCFHeader tắt): header CF-Connecting-IP do client tự đặt phải bị bỏ
+// qua, nếu không kẻ dò mật khẩu đổi header mỗi lần là né được giới hạn.
+func TestLoginRateLimitIgnoresSpoofedCFHeaderWhenUntrusted(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	attacker := withRemote("203.0.113.9:4444")
+	for i := 0; i < 5; i++ {
+		login(s, "sai", attacker, withHeader("CF-Connecting-IP", fmt.Sprintf("198.51.100.%d", i)))
+	}
+	if rec := login(s, testPassword, attacker, withHeader("CF-Connecting-IP", "198.51.100.99")); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("đổi CF-Connecting-IP khi không tin header: code %d, want 429", rec.Code)
+	}
+}
+
+// Map đầy: IP mới vẫn đăng nhập được (bỏ mục cũ nhất), không khoá tất cả mọi người.
+func TestLoginFailMapFullEvictsOldest(t *testing.T) {
+	s, _, now := newUIServer(t, goodSchedule)
+	for i := 0; i < maxLoginIPs; i++ {
+		login(s, "sai", withRemote(fmt.Sprintf("10.%d.%d.%d:1", i>>16&255, i>>8&255, i&255)))
+		if i == 0 {
+			*now = now.Add(time.Second) // mục đầu tiên là cũ nhất
+		}
+	}
+	if rec := login(s, testPassword, withRemote("192.0.2.77:1")); rec.Code != http.StatusSeeOther {
+		t.Errorf("IP mới khi map đầy: code %d, want 303", rec.Code)
+	}
+	s.loginMu.Lock()
+	n := len(s.loginFails)
+	s.loginMu.Unlock()
+	if n > maxLoginIPs {
+		t.Errorf("map vượt giới hạn: %d", n)
 	}
 }

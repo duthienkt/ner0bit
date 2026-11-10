@@ -6,6 +6,7 @@
 //	NER0BIT_DEVICE_ID  MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
 //	NER0BIT_ADDR       địa chỉ lắng nghe, mặc định ":8080"
 //	NER0BIT_DATA_DIR   thư mục dữ liệu, mặc định "./data"
+//	NER0BIT_TRUST_CF_HEADER=1  tin header CF-Connecting-IP — CHỈ khi chạy sau Cloudflare Tunnel, không mở port
 //	NER0BIT_UI_PASSWORD mật khẩu giao diện web (GET /); trống ⇒ tắt UI. Tách khỏi token thiết bị
 //	                   vì UI sửa được lịch, tức điều khiển được bơm — dùng chuỗi dài, ngẫu nhiên.
 //
@@ -37,10 +38,11 @@ func main() {
 		log.Fatal("thiếu NER0BIT_TOKEN")
 	}
 	srv := &Server{
-		Token:      token,
-		DeviceID:   os.Getenv("NER0BIT_DEVICE_ID"),
-		DataDir:    getenv("NER0BIT_DATA_DIR", "./data"),
-		UIPassword: os.Getenv("NER0BIT_UI_PASSWORD"),
+		Token:         token,
+		DeviceID:      os.Getenv("NER0BIT_DEVICE_ID"),
+		DataDir:       getenv("NER0BIT_DATA_DIR", "./data"),
+		UIPassword:    os.Getenv("NER0BIT_UI_PASSWORD"),
+		TrustCFHeader: os.Getenv("NER0BIT_TRUST_CF_HEADER") == "1",
 	}
 	if err := os.MkdirAll(srv.DataDir, 0o755); err != nil {
 		log.Fatalf("tạo thư mục dữ liệu: %v", err)
