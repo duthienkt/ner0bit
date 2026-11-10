@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <stdio.h>
 #include <string.h>
 #include "civil_time.h"
 #include "heartbeat.h"
@@ -6,14 +7,26 @@
 void setUp() {}
 void tearDown() {}
 
-static Event ev(uint32_t start, uint32_t stop, Source src, uint8_t flags) {
+static Event ev(EventType type, uint32_t at, Source src, Reason reason) {
     Event e;
-    e.start = start;
-    e.stop = stop;
+    e.at = at;
+    e.type = type;
     e.source = src;
-    e.flags = flags;
+    e.reason = reason;
     return e;
 }
+
+// Info mặc định cho test: module đều ok, 31.25 °C, queue 3.
+static HeartbeatInfo info(bool pumpOn, uint32_t uptime = 123456) {
+    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", uptime, -58, pumpOn, 182344, 150212,
+                       ModuleState::Ok, ModuleState::Ok, 125, 3, 1794323100};
+    return h;
+}
+
+static const char* kPrefixOff =
+    "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":123456,\"rssi\":-58,"
+    "\"pump_on\":false,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"ok\",\"at24c32\":\"ok\","
+    "\"temp_c\":31.25,\"queue\":3,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[";
 
 static int countOccurrences(const char* hay, const char* needle) {
     int n = 0;
@@ -57,50 +70,104 @@ void test_civil_roundtrip() {
 }
 
 void test_build_no_events() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 123456, -58, false, 1794323100};
+    HeartbeatInfo h = info(false);
     char buf[512];
     size_t n = buildHeartbeat(buf, sizeof(buf), h, nullptr, 0);
     const char* expected =
         "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":123456,\"rssi\":-58,"
-        "\"pump_on\":false,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[]}";
+        "\"pump_on\":false,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"ok\",\"at24c32\":\"ok\","
+        "\"temp_c\":31.25,\"queue\":3,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[]}";
     TEST_ASSERT_EQUAL_STRING(expected, buf);
     TEST_ASSERT_EQUAL_UINT32(strlen(expected), n);
 }
 
-void test_build_with_capped_and_skipped() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 123456, -58, true, 1794323100};
-    Event evs[3] = {
-        ev(kDay + 7 * 3600, kDay + 7 * 3600 + 300, Source::Today, 0),
-        ev(kDay + 11 * 3600, kDay + 11 * 3600 + 1800, Source::Today, kCapped),
-        ev(kDay + 11 * 3600 + 35 * 60, 0, Source::Today, kSkippedRest),
+void test_temp_unknown_omitted() {
+    HeartbeatInfo h = info(true, 7);
+    h.ds3231 = ModuleState::Absent;
+    h.at24c32 = ModuleState::Absent;
+    h.tempQuarterC = kTempUnknown;
+    h.queueLen = 0;
+    char buf[512];
+    size_t n = buildHeartbeat(buf, sizeof(buf), h, nullptr, 0);
+    const char* expected =
+        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":7,\"rssi\":-58,"
+        "\"pump_on\":true,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"absent\",\"at24c32\":\"absent\","
+        "\"queue\":0,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[]}";
+    TEST_ASSERT_EQUAL_STRING(expected, buf);
+    TEST_ASSERT_EQUAL_UINT32(strlen(expected), n);
+}
+
+void test_module_states() {
+    HeartbeatInfo h = info(false);
+    h.ds3231 = ModuleState::LostPower;
+    h.at24c32 = ModuleState::Failed;
+    char buf[512];
+    TEST_ASSERT_TRUE(buildHeartbeat(buf, sizeof(buf), h, nullptr, 0) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"ds3231\":\"lost_power\",\"at24c32\":\"failed\","));
+}
+
+static void expectTemp(int16_t q, const char* expected) {
+    HeartbeatInfo h = info(false);
+    h.tempQuarterC = q;
+    char buf[512];
+    TEST_ASSERT_TRUE(buildHeartbeat(buf, sizeof(buf), h, nullptr, 0) > 0);
+    char key[48];
+    snprintf(key, sizeof key, "\"temp_c\":%s,\"queue\":", expected);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, key), expected);
+}
+
+void test_temp_format() {
+    expectTemp(0, "0.00");
+    expectTemp(1, "0.25");
+    expectTemp(2, "0.50");
+    expectTemp(3, "0.75");
+    expectTemp(125, "31.25");
+    expectTemp(-1, "-0.25");
+    expectTemp(-15, "-3.75");
+    expectTemp(-16, "-4.00");
+    expectTemp(INT16_MAX, "8191.75");
+    expectTemp(INT16_MIN + 1, "-8191.75");
+}
+
+void test_events_exact() {
+    HeartbeatInfo h = info(false);
+    Event evs[6] = {
+        ev(EventType::Start, kDay + 7 * 3600, Source::Today, Reason::None),
+        ev(EventType::Skipped, kDay + 7 * 3600 + 120, Source::Today, Reason::Busy),
+        ev(EventType::Stop, kDay + 7 * 3600 + 300, Source::Today, Reason::Done),
+        ev(EventType::Skipped, kDay + 7 * 3600 + 360, Source::Normal, Reason::Rest),
+        ev(EventType::Stop, kDay + 11 * 3600 + 1800, Source::Failsafe, Reason::Capped),
+        ev(EventType::Stop, kDay + 12 * 3600 + 61, Source::Normal, Reason::Abort),
     };
     char buf[1024];
-    size_t n = buildHeartbeat(buf, sizeof(buf), h, evs, 3);
-    TEST_ASSERT_EQUAL_UINT32(strlen(buf), n);
-    TEST_ASSERT_EQUAL_INT(1, countOccurrences(buf, "\"capped\":true"));
-    TEST_ASSERT_EQUAL_INT(1, countOccurrences(buf, "\"skipped\":\"rest\""));
-    TEST_ASSERT_EQUAL_INT(2, countOccurrences(buf, "\"stop\""));
-
-    // Event skipped (phần tử cuối) không có "stop".
-    const char* last = strstr(buf, "{\"start\":\"2026-11-10T11:35:00+07:00\"");
-    TEST_ASSERT_NOT_NULL(last);
-    TEST_ASSERT_NULL(strstr(last, "\"stop\""));
-
-    const char* expected =
-        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":123456,\"rssi\":-58,"
-        "\"pump_on\":true,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":["
-        "{\"start\":\"2026-11-10T07:00:00+07:00\",\"stop\":\"2026-11-10T07:05:00+07:00\",\"source\":\"today\"},"
-        "{\"start\":\"2026-11-10T11:00:00+07:00\",\"stop\":\"2026-11-10T11:30:00+07:00\",\"source\":\"today\",\"capped\":true},"
-        "{\"start\":\"2026-11-10T11:35:00+07:00\",\"source\":\"today\",\"skipped\":\"rest\"}]}";
+    size_t n = buildHeartbeat(buf, sizeof(buf), h, evs, 6);
+    char expected[1024];
+    snprintf(expected, sizeof expected, "%s%s", kPrefixOff,
+             "{\"type\":\"start\",\"at\":\"2026-11-10T07:00:00+07:00\",\"source\":\"today\"},"
+             "{\"type\":\"skipped\",\"at\":\"2026-11-10T07:02:00+07:00\",\"source\":\"today\",\"reason\":\"busy\"},"
+             "{\"type\":\"stop\",\"at\":\"2026-11-10T07:05:00+07:00\",\"source\":\"today\",\"reason\":\"done\"},"
+             "{\"type\":\"skipped\",\"at\":\"2026-11-10T07:06:00+07:00\",\"source\":\"normal\",\"reason\":\"rest\"},"
+             "{\"type\":\"stop\",\"at\":\"2026-11-10T11:30:00+07:00\",\"source\":\"failsafe\",\"reason\":\"capped\"},"
+             "{\"type\":\"stop\",\"at\":\"2026-11-10T12:01:01+07:00\",\"source\":\"normal\",\"reason\":\"abort\"}]}");
     TEST_ASSERT_EQUAL_STRING(expected, buf);
+    TEST_ASSERT_EQUAL_UINT32(strlen(expected), n);
+}
+
+// Start không bao giờ có "reason" (kể cả khi record mang reason khác None).
+void test_start_never_has_reason() {
+    HeartbeatInfo h = info(false);
+    Event e = ev(EventType::Start, kDay, Source::Normal, Reason::Capped);
+    char buf[512];
+    TEST_ASSERT_TRUE(buildHeartbeat(buf, sizeof(buf), h, &e, 1) > 0);
+    TEST_ASSERT_NULL(strstr(buf, "\"reason\""));
 }
 
 void test_sources() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 1, 0, false, kDay};
+    HeartbeatInfo h = info(false, 1);
     Event evs[3] = {
-        ev(kDay, kDay + 60, Source::Normal, 0),
-        ev(kDay, kDay + 60, Source::Today, 0),
-        ev(kDay, kDay + 60, Source::Failsafe, 0),
+        ev(EventType::Stop, kDay + 60, Source::Normal, Reason::Done),
+        ev(EventType::Stop, kDay + 60, Source::Today, Reason::Done),
+        ev(EventType::Stop, kDay + 60, Source::Failsafe, Reason::Done),
     };
     char buf[1024];
     TEST_ASSERT_TRUE(buildHeartbeat(buf, sizeof(buf), h, evs, 3) > 0);
@@ -110,14 +177,14 @@ void test_sources() {
 }
 
 void test_buffer_too_small_returns_0() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 123456, -58, false, 1794323100};
+    HeartbeatInfo h = info(false);
     char buf[50];
     TEST_ASSERT_EQUAL_UINT32(0, buildHeartbeat(buf, 50, h, nullptr, 0));
 }
 
 void test_buffer_exact_fit_boundary() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 123456, -58, false, 1794323100};
-    Event e = ev(kDay, kDay + 300, Source::Normal, kCapped);
+    HeartbeatInfo h = info(false);
+    Event e = ev(EventType::Stop, kDay + 300, Source::Normal, Reason::Capped);
     char big[1024];
     size_t n = buildHeartbeat(big, sizeof(big), h, &e, 1);
     TEST_ASSERT_TRUE(n > 0);
@@ -129,30 +196,28 @@ void test_buffer_exact_fit_boundary() {
     TEST_ASSERT_EQUAL_UINT32(0, buildHeartbeat(buf, n, h, &e, 1));
 }
 
+// Trường hợp xấu nhất: mọi số dài nhất, chuỗi trạng thái dài nhất ("lost_power"), nhiệt độ âm dài
+// nhất, 20 event với tổ hợp tên dài nhất mà formatter có thể in (skipped + failsafe + capped — kể cả
+// record hỏng), epoch max.
 void test_max_events_fits_buf_size() {
-    // Trường hợp xấu nhất: uptime/rssi dài nhất, 20 event có stop + capped, epoch max.
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 4294967295u, -100, false, 4294967295u};
+    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 4294967295u, INT32_MIN, false, 4294967295u, 4294967295u,
+                       ModuleState::LostPower, ModuleState::LostPower, INT16_MIN + 1, 65535, 4294967295u};
     Event evs[kMaxEventsPerHeartbeat];
     for (uint16_t i = 0; i < kMaxEventsPerHeartbeat; i++)
-        evs[i] = ev(4294967295u, 4294967295u, Source::Failsafe, kCapped);
-    char buf[kHeartbeatBufSize];
+        evs[i] = ev(EventType::Skipped, 4294967295u, Source::Failsafe, Reason::Capped);
+    static char buf[4096];
     size_t n = buildHeartbeat(buf, sizeof(buf), h, evs, kMaxEventsPerHeartbeat);
     TEST_ASSERT_TRUE(n > 0);
-    TEST_ASSERT_EQUAL_INT(kMaxEventsPerHeartbeat, countOccurrences(buf, "\"capped\":true"));
-    TEST_ASSERT_EQUAL_INT(kMaxEventsPerHeartbeat, countOccurrences(buf, "\"start\":\"2106-02-07T06:28:15+07:00\""));
-}
-
-void test_skipped_busy() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 1, -58, true, 1794323100};
-    Event e = ev(kDay + 7 * 3600 + 5 * 60, 0, Source::Normal, kSkippedBusy);
-    char buf[512];
-    size_t n = buildHeartbeat(buf, sizeof(buf), h, &e, 1);
-    const char* expected =
-        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":1,\"rssi\":-58,"
-        "\"pump_on\":true,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":["
-        "{\"start\":\"2026-11-10T07:05:00+07:00\",\"source\":\"normal\",\"skipped\":\"busy\"}]}";
-    TEST_ASSERT_EQUAL_STRING(expected, buf);
-    TEST_ASSERT_EQUAL_UINT32(strlen(expected), n);
+    TEST_ASSERT_EQUAL_INT(kMaxEventsPerHeartbeat,
+                          countOccurrences(buf, "{\"type\":\"skipped\",\"at\":\"2106-02-07T06:28:15+07:00\","
+                                                "\"source\":\"failsafe\",\"reason\":\"capped\"}"));
+    char msg[64];
+    snprintf(msg, sizeof msg, "worst case = %u byte", (unsigned)n);
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_TRUE_MESSAGE(n + 1 <= kHeartbeatBufSize, msg);
+    // Buffer đúng cỡ khai báo cũng build được.
+    static char exact[kHeartbeatBufSize];
+    TEST_ASSERT_EQUAL_UINT32(n, buildHeartbeat(exact, sizeof(exact), h, evs, kMaxEventsPerHeartbeat));
 }
 
 int main(int, char**) {
@@ -160,11 +225,14 @@ int main(int, char**) {
     RUN_TEST(test_format_iso);
     RUN_TEST(test_civil_roundtrip);
     RUN_TEST(test_build_no_events);
-    RUN_TEST(test_build_with_capped_and_skipped);
+    RUN_TEST(test_temp_unknown_omitted);
+    RUN_TEST(test_module_states);
+    RUN_TEST(test_temp_format);
+    RUN_TEST(test_events_exact);
+    RUN_TEST(test_start_never_has_reason);
     RUN_TEST(test_sources);
     RUN_TEST(test_buffer_too_small_returns_0);
     RUN_TEST(test_buffer_exact_fit_boundary);
     RUN_TEST(test_max_events_fits_buf_size);
-    RUN_TEST(test_skipped_busy);
     return UNITY_END();
 }

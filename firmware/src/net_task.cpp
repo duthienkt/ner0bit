@@ -6,6 +6,7 @@
 #include <WiFiClientSecure.h>
 #include <esp_mac.h>
 #include <esp_sntp.h>
+#include <esp_system.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -234,6 +235,7 @@ bool heartbeat() {
     }
 
     uint16_t n;
+    uint16_t queueLen;
     uint32_t droppedAtPeek;
     bool pumpOn;
     bool clockOk;
@@ -241,13 +243,26 @@ bool heartbeat() {
     {
         SharedLock lock;
         n = g_queue.peek(s_events, kMaxEventsPerHeartbeat);
+        queueLen = g_queue.count();
         droppedAtPeek = g_queue.dropped();
         pumpOn = pump::isOn();
         clockOk = g_clockValid && localNow(rtc);
     }
     if (!clockOk) rtc = 0;  // đồng hồ không dùng được ⇒ "rtc" = 1970, server thấy ngay
 
-    HeartbeatInfo info{s_id, kFw, monoSec(), (int)WiFi.RSSI(), pumpOn, rtc};
+    // TODO(Task 2): trạng thái DS3231/AT24C32 và nhiệt độ thật.
+    HeartbeatInfo info{s_id,
+                       kFw,
+                       monoSec(),
+                       (int)WiFi.RSSI(),
+                       pumpOn,
+                       (uint32_t)esp_get_free_heap_size(),
+                       (uint32_t)esp_get_minimum_free_heap_size(),
+                       ModuleState::Absent,
+                       ModuleState::Absent,
+                       kTempUnknown,
+                       queueLen,
+                       rtc};
     const size_t len = buildHeartbeat(s_json, sizeof s_json, info, s_events, n);
     if (len == 0) {
         Serial.println("[net] lỗi: buildHeartbeat không đủ buffer");

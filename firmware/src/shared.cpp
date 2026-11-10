@@ -37,9 +37,8 @@ void persist(const TickResult& r) {
 
 void logEvent(const TickResult& r) {
     if (!r.hasEvent) return;
-    Serial.printf("[sched] event start=%lu stop=%lu source=%u flags=%u\n",
-                  (unsigned long)r.event.start, (unsigned long)r.event.stop,
-                  (unsigned)r.event.source, (unsigned)r.event.flags);
+    Serial.printf("[sched] event type=%u at=%lu source=%u reason=%u\n", (unsigned)r.event.type,
+                  (unsigned long)r.event.at, (unsigned)r.event.source, (unsigned)r.event.reason);
 }
 
 }  // namespace

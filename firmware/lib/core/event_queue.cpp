@@ -2,7 +2,7 @@
 
 namespace {
 
-constexpr uint16_t kMagic = 0x4E42;
+constexpr uint16_t kMagic = 0x4E43;
 constexpr uint16_t kHeaderAddr = 0x0000;
 constexpr uint16_t kHeaderLen = 6;
 constexpr uint16_t kLastStopAddr = 0x0008;
@@ -81,11 +81,11 @@ void EventQueue::writeHeader() {
 void EventQueue::push(const Event& e) {
     if (!available_) return;
     uint16_t slot = (uint16_t)((head_ + count_) % kQueueCapacity);
-    uint8_t rec[kRecordLen];
-    put32(rec, e.start);
-    put32(rec + 4, e.stop);
-    rec[8] = (uint8_t)e.source;
-    rec[9] = e.flags;
+    uint8_t rec[kRecordLen] = {};
+    put32(rec, e.at);
+    rec[4] = (uint8_t)e.type;
+    rec[5] = (uint8_t)e.source;
+    rec[6] = (uint8_t)e.reason;
     storage_.write(recordAddr(slot), rec, sizeof(rec));
     if (count_ < kQueueCapacity) {
         count_++;
@@ -103,10 +103,10 @@ uint16_t EventQueue::peek(Event* out, uint16_t max) const {
         uint8_t rec[kRecordLen];
         uint16_t slot = (uint16_t)((head_ + i) % kQueueCapacity);
         if (!storage_.read(recordAddr(slot), rec, sizeof(rec))) return i;
-        out[i].start = get32(rec);
-        out[i].stop = get32(rec + 4);
-        out[i].source = (Source)rec[8];
-        out[i].flags = rec[9];
+        out[i].at = get32(rec);
+        out[i].type = (EventType)rec[4];
+        out[i].source = (Source)rec[5];
+        out[i].reason = (Reason)rec[6];
     }
     return n;
 }

@@ -46,6 +46,50 @@ static const char* sourceName(Source s) {
     }
 }
 
+// Tên mặc định khi record hỏng (giá trị enum lạ) nằm trong tập tên hợp lệ, không dài hơn tên dài
+// nhất ⇒ kHeartbeatBufSize vẫn đủ.
+static const char* typeName(EventType t) {
+    switch (t) {
+        case EventType::Start:
+            return "start";
+        case EventType::Skipped:
+            return "skipped";
+        case EventType::Stop:
+        default:
+            return "stop";
+    }
+}
+
+static const char* reasonName(Reason r) {
+    switch (r) {
+        case Reason::Capped:
+            return "capped";
+        case Reason::Abort:
+            return "abort";
+        case Reason::Rest:
+            return "rest";
+        case Reason::Busy:
+            return "busy";
+        case Reason::Done:
+        default:
+            return "done";
+    }
+}
+
+static const char* moduleName(ModuleState m) {
+    switch (m) {
+        case ModuleState::Ok:
+            return "ok";
+        case ModuleState::LostPower:
+            return "lost_power";
+        case ModuleState::Failed:
+            return "failed";
+        case ModuleState::Absent:
+        default:
+            return "absent";
+    }
+}
+
 namespace {
 // Ghi tích luỹ bằng snprintf; một lần tràn là hỏng cả chuỗi.
 struct Writer {
@@ -73,23 +117,30 @@ size_t buildHeartbeat(char* buf, size_t cap, const HeartbeatInfo& h, const Event
     if (buf == nullptr || cap == 0) return 0;
     Writer w = {buf, cap, 0, true};
     char ts[26];
-    char ts2[26];
 
+    w.add("{\"id\":\"%s\",\"fw\":\"%s\",\"uptime_s\":%lu,\"rssi\":%d,\"pump_on\":%s,"
+          "\"heap_free\":%lu,\"heap_min\":%lu,\"ds3231\":\"%s\",\"at24c32\":\"%s\",",
+          h.id, h.fw, (unsigned long)h.uptimeS, h.rssi, h.pumpOn ? "true" : "false", (unsigned long)h.heapFree,
+          (unsigned long)h.heapMin, moduleName(h.ds3231), moduleName(h.at24c32));
+    if (h.tempQuarterC != kTempUnknown) {
+        // 0,25 °C/đơn vị ⇒ phần lẻ luôn .00/.25/.50/.75; in bằng số nguyên, không dùng float.
+        const int32_t q = h.tempQuarterC;
+        const uint32_t a = (uint32_t)(q < 0 ? -q : q);
+        w.add("\"temp_c\":%s%lu.%02u,", q < 0 ? "-" : "", (unsigned long)(a / 4), (unsigned)(a % 4 * 25));
+    }
     formatIsoLocal(h.rtcLocal, ts);
-    w.add("{\"id\":\"%s\",\"fw\":\"%s\",\"uptime_s\":%lu,\"rssi\":%d,\"pump_on\":%s,\"rtc\":\"%s\",\"events\":[",
-          h.id, h.fw, (unsigned long)h.uptimeS, h.rssi, h.pumpOn ? "true" : "false", ts);
+    w.add("\"queue\":%u,\"rtc\":\"%s\",\"events\":[", (unsigned)h.queueLen, ts);
 
     for (uint16_t i = 0; i < n && ev != nullptr; i++) {
         const Event& e = ev[i];
-        formatIsoLocal(e.start, ts);
-        const char* sep = i ? "," : "";
-        if (e.flags & (kSkippedRest | kSkippedBusy)) {
-            w.add("%s{\"start\":\"%s\",\"source\":\"%s\",\"skipped\":\"%s\"}", sep, ts, sourceName(e.source),
-                  (e.flags & kSkippedBusy) ? "busy" : "rest");
+        formatIsoLocal(e.at, ts);
+        w.add("%s{\"type\":\"%s\",\"at\":\"%s\",\"source\":\"%s\"", i ? "," : "", typeName(e.type), ts,
+              sourceName(e.source));
+        // Start không có reason; record hỏng (type lạ) in như stop nên cũng có reason.
+        if (e.type == EventType::Start) {
+            w.add("}");
         } else {
-            formatIsoLocal(e.stop, ts2);
-            w.add("%s{\"start\":\"%s\",\"stop\":\"%s\",\"source\":\"%s\"%s}", sep, ts, ts2, sourceName(e.source),
-                  (e.flags & kCapped) ? ",\"capped\":true" : "");
+            w.add(",\"reason\":\"%s\"}", reasonName(e.reason));
         }
     }
     w.add("]}");
