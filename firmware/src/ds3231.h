@@ -10,7 +10,10 @@ bool begin();
 bool readUtc(uint32_t& utc);
 // Ghi giờ UTC và xoá cờ OSF. false nếu lỗi I2C.
 bool writeUtc(uint32_t utc);
-// Cờ OSF (bit 7 thanh ghi 0x0F): dao động đã dừng ⇒ giờ không tin được.
-// Lỗi I2C cũng trả true (coi như đồng hồ chưa hợp lệ).
-bool lostPower();
+// Đọc cờ OSF (bit 7 thanh ghi 0x0F) vào stopped: dao động đã dừng (mất nguồn, pin hết) ⇒ giờ
+// không tin được. false nếu lỗi I2C (stopped không đổi).
+bool oscStopped(bool& stopped);
+// Nhiệt độ cảm biến trong chip, đơn vị 0,25 °C: thanh ghi 0x11 (°C, có dấu) + bit 7:6 của 0x12
+// (phần tư độ). false nếu lỗi I2C.
+bool readTempQuarters(int16_t& quarters);
 }  // namespace ds3231

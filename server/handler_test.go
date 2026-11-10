@@ -20,10 +20,13 @@ const (
 	testID    = "a4cf12b8e901"
 )
 
+// Đúng định dạng firmware gửi (không khoảng trắng, thứ tự khoá như docs/system-design.md).
 const sampleHeartbeat = `{"id":"a4cf12b8e901","fw":"0.1.0","uptime_s":123456,"rssi":-58,"pump_on":false,` +
+	`"heap_free":182344,"heap_min":151020,"ds3231":"ok","at24c32":"ok","temp_c":27.25,"queue":3,` +
 	`"rtc":"2026-11-10T15:05:00+07:00","events":[` +
-	`{"start":"2026-11-10T07:00:00+07:00","stop":"2026-11-10T07:05:00+07:00","source":"today"},` +
-	`{"start":"2026-11-10T11:35:00+07:00","source":"today","skipped":"rest"}]}`
+	`{"type":"start","at":"2026-11-10T07:00:00+07:00","source":"today"},` +
+	`{"type":"stop","at":"2026-11-10T07:05:00+07:00","source":"today","reason":"done"},` +
+	`{"type":"skipped","at":"2026-11-10T07:08:00+07:00","source":"today","reason":"rest"}]}`
 
 func newTestServer(t *testing.T, schedule string) (*Server, string) {
 	t.Helper()
@@ -82,15 +85,15 @@ func TestHeartbeatOK(t *testing.T) {
 	}
 
 	ev := readLines(t, filepath.Join(dir, "events.jsonl"))
-	if len(ev) != 2 {
+	if len(ev) != 3 {
 		t.Fatalf("events.jsonl có %d dòng", len(ev))
 	}
 	var e map[string]any
-	if err := json.Unmarshal([]byte(ev[1]), &e); err != nil {
+	if err := json.Unmarshal([]byte(ev[2]), &e); err != nil {
 		t.Fatal(err)
 	}
-	if e["id"] != testID || e["skipped"] != "rest" || e["received_at"] == nil {
-		t.Errorf("event sai: %s", ev[1])
+	if e["id"] != testID || e["type"] != "skipped" || e["reason"] != "rest" || e["received_at"] == nil {
+		t.Errorf("event sai: %s", ev[2])
 	}
 }
 

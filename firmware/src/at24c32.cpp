@@ -24,6 +24,11 @@ static bool waitReady() {
     }
 }
 
+bool At24c32::present() {
+    Wire.beginTransmission(kAddr);
+    return Wire.endTransmission() == 0;
+}
+
 bool At24c32::read(uint16_t addr, uint8_t* buf, uint16_t len) {
     if (!inRange(addr, len)) return false;
     while (len > 0) {

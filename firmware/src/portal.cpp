@@ -144,7 +144,7 @@ void handleSave() {
         error = "Đổi Server URL thì phải nhập lại Token.";
     }
     if (error) {
-        Serial.printf("[portal] form lỗi: %s\n", error);
+        nlog("[portal] form lỗi: %s\n", error);
         sendForm(400, error, ssid, url);
         return;
     }
@@ -156,7 +156,7 @@ void handleSave() {
     if (token.length() > 0 || !s_current) copyField(cfg.token, token);
 
     config::save(cfg);
-    Serial.printf("[portal] đã lưu cấu hình (SSID \"%s\"), khởi động lại\n", cfg.ssid);
+    nlog("[portal] đã lưu cấu hình (SSID \"%s\"), khởi động lại\n", cfg.ssid);
     sendPage(200, F("<p>Đã lưu. Thiết bị đang khởi động lại và nối WiFi nhà.</p>"));
     s_restartPending = true;
     s_restartAt = millis() + kRestartDelayMs;
@@ -204,12 +204,12 @@ void run(const NetConfig* current) {
 
     WiFi.persistent(false);
     WiFi.mode(WIFI_AP);
-    if (!WiFi.softAPConfig(kApIp, kApIp, kApMask)) Serial.println("[portal] lỗi softAPConfig");
-    if (!WiFi.softAP(kApSsid)) Serial.println("[portal] lỗi softAP");
+    if (!WiFi.softAPConfig(kApIp, kApIp, kApMask)) nlogln("[portal] lỗi softAPConfig");
+    if (!WiFi.softAP(kApSsid)) nlogln("[portal] lỗi softAP");
 
     s_dns = new DNSServer;
     s_dns->setErrorReplyCode(DNSReplyCode::NoError);
-    if (!s_dns->start(53, "*", kApIp)) Serial.println("[portal] lỗi DNSServer");
+    if (!s_dns->start(53, "*", kApIp)) nlogln("[portal] lỗi DNSServer");
 
     s_server = new WebServer(80);
     s_server->on("/", HTTP_GET, handleRoot);
@@ -217,7 +217,7 @@ void run(const NetConfig* current) {
     s_server->onNotFound(handleNotFound);
     s_server->begin();
 
-    Serial.printf("[portal] AP \"%s\" (không mật khẩu), mở http://192.168.4.1/%s\n", kApSsid,
+    nlog("[portal] AP \"%s\" (không mật khẩu), mở http://192.168.4.1/%s\n", kApSsid,
                   current ? " — 10 phút không lưu sẽ khởi động lại" : "");
 
     const uint32_t start = millis();
@@ -231,7 +231,7 @@ void run(const NetConfig* current) {
             ESP.restart();
         }
         if (current && !s_restartPending && millis() - start >= kIdleTimeoutMs) {
-            Serial.println("[portal] 10 phút không lưu, khởi động lại với cấu hình cũ");
+            nlogln("[portal] 10 phút không lưu, khởi động lại với cấu hình cũ");
             stopPumpForRestart();
             delay(100);  // cho Serial in xong
             ESP.restart();

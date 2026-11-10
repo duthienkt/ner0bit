@@ -24,7 +24,7 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
             haveRunStop_ = true;
             monoLastStop_ = mono;
             r.hasEvent = true;
-            r.event = Event{startActual_, now, runSource_, runFlags_};
+            r.event = Event{now, EventType::Stop, runSource_, runCapped_ ? Reason::Capped : Reason::Done};
             r.lastStopChanged = true;
             r.lastStop = now;
             return r;
@@ -35,7 +35,7 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
         if (hasSchedule_ && findDue(now, false, c)) {
             handledUpTo_ = c.start;
             r.hasEvent = true;
-            r.event = Event{c.start, 0, c.src, kSkippedBusy};
+            r.event = Event{c.start, EventType::Skipped, c.src, Reason::Busy};
         }
         return r;
     }
@@ -48,7 +48,7 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
     handledUpTo_ = c.start;
     if (restViolated(now, mono)) {
         r.hasEvent = true;
-        r.event = Event{c.start, 0, c.src, kSkippedRest};
+        r.event = Event{c.start, EventType::Skipped, c.src, Reason::Rest};
     } else {
         running_ = true;
         startActual_ = now;
@@ -56,8 +56,10 @@ TickResult Scheduler::tick(uint32_t now, uint32_t mono) {
         runDur_ = stopAt_ - now;
         monoStart_ = mono;
         runSource_ = c.src;
-        runFlags_ = c.capped ? kCapped : 0;
+        runCapped_ = c.capped;
         r.pumpOn = true;
+        r.hasEvent = true;
+        r.event = Event{now, EventType::Start, c.src, Reason::None};
     }
     return r;
 }
@@ -74,7 +76,7 @@ TickResult Scheduler::abort(uint32_t mono) {
     haveRunStop_ = true;
     monoLastStop_ = mono;
     r.hasEvent = true;
-    r.event = Event{startActual_, stop, runSource_, runFlags_};
+    r.event = Event{stop, EventType::Stop, runSource_, Reason::Abort};
     r.lastStopChanged = true;
     r.lastStop = stop;
     return r;

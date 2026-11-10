@@ -29,43 +29,48 @@ class RamStorage : public IStorage {
 void setUp() {}
 void tearDown() {}
 
-static Event ev(uint32_t start, uint32_t stop = 0, Source src = Source::Normal, uint8_t flags = 0) {
+static Event ev(uint32_t at, EventType type = EventType::Stop, Source src = Source::Normal,
+                Reason reason = Reason::Done) {
     Event e;
-    e.start = start;
-    e.stop = stop;
+    e.at = at;
+    e.type = type;
     e.source = src;
-    e.flags = flags;
+    e.reason = reason;
     return e;
+}
+
+static void expectEv(const Event& e, uint32_t at, EventType type, Source src, Reason reason) {
+    TEST_ASSERT_EQUAL_UINT32(at, e.at);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)type, (uint8_t)e.type);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)src, (uint8_t)e.source);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)reason, (uint8_t)e.reason);
 }
 
 void test_push_peek_pop_fifo() {
     RamStorage st;
     EventQueue q(st);
     q.begin();
-    q.push(ev(100, 400, Source::Normal, 0));
-    q.push(ev(200, 0, Source::Today, kSkippedRest));
-    q.push(ev(300, 2100, Source::Failsafe, kCapped));
-    TEST_ASSERT_EQUAL_UINT16(3, q.count());
+    q.push(ev(100, EventType::Start, Source::Normal, Reason::None));
+    q.push(ev(200, EventType::Skipped, Source::Today, Reason::Busy));
+    q.push(ev(400, EventType::Stop, Source::Normal, Reason::Done));
+    q.push(ev(500, EventType::Skipped, Source::Today, Reason::Rest));
+    q.push(ev(2100, EventType::Stop, Source::Failsafe, Reason::Capped));
+    q.push(ev(2200, EventType::Stop, Source::Today, Reason::Abort));
+    TEST_ASSERT_EQUAL_UINT16(6, q.count());
 
-    Event out[5];
-    TEST_ASSERT_EQUAL_UINT16(3, q.peek(out, 5));
-    TEST_ASSERT_EQUAL_UINT32(100, out[0].start);
-    TEST_ASSERT_EQUAL_UINT32(400, out[0].stop);
-    TEST_ASSERT_TRUE(Source::Normal == out[0].source);
-    TEST_ASSERT_EQUAL_UINT8(0, out[0].flags);
-    TEST_ASSERT_EQUAL_UINT32(200, out[1].start);
-    TEST_ASSERT_EQUAL_UINT32(0, out[1].stop);
-    TEST_ASSERT_TRUE(Source::Today == out[1].source);
-    TEST_ASSERT_EQUAL_UINT8(kSkippedRest, out[1].flags);
-    TEST_ASSERT_EQUAL_UINT32(300, out[2].start);
-    TEST_ASSERT_EQUAL_UINT32(2100, out[2].stop);
-    TEST_ASSERT_TRUE(Source::Failsafe == out[2].source);
-    TEST_ASSERT_EQUAL_UINT8(kCapped, out[2].flags);
+    Event out[8];
+    TEST_ASSERT_EQUAL_UINT16(6, q.peek(out, 8));
+    expectEv(out[0], 100, EventType::Start, Source::Normal, Reason::None);
+    expectEv(out[1], 200, EventType::Skipped, Source::Today, Reason::Busy);
+    expectEv(out[2], 400, EventType::Stop, Source::Normal, Reason::Done);
+    expectEv(out[3], 500, EventType::Skipped, Source::Today, Reason::Rest);
+    expectEv(out[4], 2100, EventType::Stop, Source::Failsafe, Reason::Capped);
+    expectEv(out[5], 2200, EventType::Stop, Source::Today, Reason::Abort);
 
-    q.pop(2);
+    q.pop(5);
     TEST_ASSERT_EQUAL_UINT16(1, q.count());
-    TEST_ASSERT_EQUAL_UINT16(1, q.peek(out, 5));
-    TEST_ASSERT_EQUAL_UINT32(300, out[0].start);
+    TEST_ASSERT_EQUAL_UINT16(1, q.peek(out, 8));
+    expectEv(out[0], 2200, EventType::Stop, Source::Today, Reason::Abort);
 }
 
 void test_peek_respects_max() {
@@ -75,8 +80,8 @@ void test_peek_respects_max() {
     for (uint32_t i = 0; i < 5; i++) q.push(ev(i));
     Event out[2];
     TEST_ASSERT_EQUAL_UINT16(2, q.peek(out, 2));
-    TEST_ASSERT_EQUAL_UINT32(0, out[0].start);
-    TEST_ASSERT_EQUAL_UINT32(1, out[1].start);
+    TEST_ASSERT_EQUAL_UINT32(0, out[0].at);
+    TEST_ASSERT_EQUAL_UINT32(1, out[1].at);
 }
 
 void test_overflow_drops_oldest() {
@@ -87,7 +92,7 @@ void test_overflow_drops_oldest() {
     TEST_ASSERT_EQUAL_UINT16(kQueueCapacity, q.count());
     Event out[1];
     TEST_ASSERT_EQUAL_UINT16(1, q.peek(out, 1));
-    TEST_ASSERT_EQUAL_UINT32(5, out[0].start);
+    TEST_ASSERT_EQUAL_UINT32(5, out[0].at);
 }
 
 void test_wraparound_persists() {
@@ -95,21 +100,14 @@ void test_wraparound_persists() {
     {
         EventQueue q(st);
         q.begin();
-        for (uint32_t i = 0; i < 250; i++) q.push(ev(i, i + 1000, Source::Today, kCapped));
+        for (uint32_t i = 0; i < 250; i++) q.push(ev(i, EventType::Stop, Source::Today, Reason::Capped));
     }
     EventQueue q2(st);
     q2.begin();
     TEST_ASSERT_EQUAL_UINT16(200, q2.count());
     static Event out[kQueueCapacity];
     TEST_ASSERT_EQUAL_UINT16(200, q2.peek(out, kQueueCapacity));
-    for (uint16_t i = 0; i < 200; i++) {
-        TEST_ASSERT_EQUAL_UINT32(50 + i, out[i].start);
-        TEST_ASSERT_EQUAL_UINT32(1050 + i, out[i].stop);
-    }
-    TEST_ASSERT_EQUAL_UINT32(50, out[0].start);
-    TEST_ASSERT_EQUAL_UINT32(249, out[199].start);
-    TEST_ASSERT_TRUE(Source::Today == out[199].source);
-    TEST_ASSERT_EQUAL_UINT8(kCapped, out[199].flags);
+    for (uint16_t i = 0; i < 200; i++) expectEv(out[i], 50 + i, EventType::Stop, Source::Today, Reason::Capped);
 }
 
 void test_pop_persists() {
@@ -125,7 +123,7 @@ void test_pop_persists() {
     TEST_ASSERT_EQUAL_UINT16(6, q2.count());
     Event out[1];
     q2.peek(out, 1);
-    TEST_ASSERT_EQUAL_UINT32(4, out[0].start);
+    TEST_ASSERT_EQUAL_UINT32(4, out[0].at);
 }
 
 void test_bad_magic_resets() {
@@ -185,23 +183,41 @@ void test_pop_more_than_count() {
 
 void test_layout_little_endian() {
     RamStorage st;
+    memset(st.mem, 0xFF, sizeof(st.mem));  // byte dự trữ phải được ghi 0, không để rác
     EventQueue q(st);
     q.begin();
     q.setLastStop(0x11223344);
-    q.push(ev(0xA1A2A3A4, 0xB1B2B3B4, Source::Failsafe, kCapped));
+    q.push(ev(0xA1A2A3A4, EventType::Skipped, Source::Failsafe, Reason::Busy));
+    q.push(ev(0xB1B2B3B4, EventType::Start, Source::Today, Reason::None));
     // header
-    TEST_ASSERT_EQUAL_HEX8(0x42, st.mem[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x43, st.mem[0]);
     TEST_ASSERT_EQUAL_HEX8(0x4E, st.mem[1]);
     TEST_ASSERT_EQUAL_HEX8(0, st.mem[2]);  // head
     TEST_ASSERT_EQUAL_HEX8(0, st.mem[3]);
-    TEST_ASSERT_EQUAL_HEX8(1, st.mem[4]);  // count
+    TEST_ASSERT_EQUAL_HEX8(2, st.mem[4]);  // count
     TEST_ASSERT_EQUAL_HEX8(0, st.mem[5]);
     // lastStop @0x0008
     TEST_ASSERT_EQUAL_HEX8(0x44, st.mem[8]);
     TEST_ASSERT_EQUAL_HEX8(0x11, st.mem[11]);
-    // record 0 @0x0010
-    const uint8_t expect[10] = {0xA4, 0xA3, 0xA2, 0xA1, 0xB4, 0xB3, 0xB2, 0xB1, 2, kCapped};
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expect, st.mem + 0x10, 10);
+    // record 0 @0x0010, record 1 @0x001A: {u32 at, u8 type, u8 source, u8 reason, 3 byte 0}
+    const uint8_t expect[20] = {0xA4, 0xA3, 0xA2, 0xA1, 2, 2, 5, 0, 0, 0,
+                                0xB4, 0xB3, 0xB2, 0xB1, 0, 1, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expect, st.mem + 0x10, 20);
+}
+
+// Layout record đổi ⇒ magic mới; nội dung magic cũ 0x4E42 bị format một lần.
+void test_old_magic_formatted() {
+    RamStorage st;
+    const uint8_t oldHeader[12] = {0x42, 0x4E, 0, 0, 3, 0, 0, 0, 0x39, 0x30, 0, 0};
+    memcpy(st.mem, oldHeader, sizeof(oldHeader));
+    EventQueue q(st);
+    q.begin();
+    TEST_ASSERT_TRUE(q.available());
+    TEST_ASSERT_EQUAL_UINT16(0, q.count());
+    TEST_ASSERT_EQUAL_UINT32(0, q.lastStop());
+    TEST_ASSERT_EQUAL_HEX8(0x43, st.mem[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x4E, st.mem[1]);
+    TEST_ASSERT_EQUAL_HEX8(0, st.mem[4]);
 }
 
 // M1: bộ đếm record bị ghi đè khi queue đầy.
@@ -234,7 +250,7 @@ void test_pop_sent_after_concurrent_overflow() {
     TEST_ASSERT_EQUAL_UINT16(kQueueCapacity - 47, q.count());
     Event first[1];
     TEST_ASSERT_EQUAL_UINT16(1, q.peek(first, 1));
-    TEST_ASSERT_EQUAL_UINT32(50, first[0].start);  // event chưa gửi đầu tiên vẫn còn
+    TEST_ASSERT_EQUAL_UINT32(50, first[0].at);  // event chưa gửi đầu tiên vẫn còn
 }
 
 void test_pop_sent_when_drops_exceed_sent() {
@@ -250,7 +266,7 @@ void test_pop_sent_when_drops_exceed_sent() {
     TEST_ASSERT_EQUAL_UINT16(kQueueCapacity, q.count());
     Event first[1];
     q.peek(first, 1);
-    TEST_ASSERT_EQUAL_UINT32(5, first[0].start);
+    TEST_ASSERT_EQUAL_UINT32(5, first[0].at);
 }
 
 void test_pop_sent_without_overflow() {
@@ -266,7 +282,7 @@ void test_pop_sent_without_overflow() {
     TEST_ASSERT_EQUAL_UINT16(7, q.count());
     Event first[1];
     q.peek(first, 1);
-    TEST_ASSERT_EQUAL_UINT32(4, first[0].start);
+    TEST_ASSERT_EQUAL_UINT32(4, first[0].at);
 }
 
 // M4: lỗi đọc thoáng qua lúc boot ⇒ đọc lại, không format.
@@ -302,7 +318,7 @@ void test_persistent_header_read_failure_leaves_storage_untouched() {
     TEST_ASSERT_FALSE(q2.available());
     TEST_ASSERT_EQUAL_UINT16(0, q2.count());
     TEST_ASSERT_EQUAL_UINT32(0, q2.lastStop());
-    q2.push(ev(50, 60));
+    q2.push(ev(50));
     q2.pop(1);
     q2.popSent(1, 0);
     q2.setLastStop(777);
@@ -332,6 +348,7 @@ int main() {
     RUN_TEST(test_last_stop_persists);
     RUN_TEST(test_pop_more_than_count);
     RUN_TEST(test_layout_little_endian);
+    RUN_TEST(test_old_magic_formatted);
     RUN_TEST(test_dropped_counts_overwrites);
     RUN_TEST(test_pop_sent_after_concurrent_overflow);
     RUN_TEST(test_pop_sent_when_drops_exceed_sent);

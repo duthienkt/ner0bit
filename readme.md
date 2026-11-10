@@ -5,7 +5,9 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 ## Tính năng
 
 - Kết nối Wi-Fi, mỗi 5 phút POST heartbeat lên server và nhận lịch tưới mới.
-- Tưới theo lịch: bật/tắt bơm đúng mốc giờ (RTC DS3231, độc lập mạng).
+- Tưới theo lịch: bật/tắt bơm đúng mốc giờ theo đồng hồ hệ thống ESP32 (đặt theo header `Date` của server, NTP tinh chỉnh), độc lập mạng.
+- Mỗi lần bật/tắt bơm hoặc bỏ mốc là một event (`start` / `stop` / `skipped`), gửi lên server ~3 giây sau khi xảy ra. Heartbeat kèm heap trống, trạng thái module, nhiệt độ DS3231.
+- Module DS3231 + AT24C32 **tuỳ chọn**: có module thì giữ giờ qua mất điện khi không có mạng, queue events và lịch cache nằm trên EEPROM; không có thì queue events nằm trong RAM, lịch cache trong NVS — mất điện lúc không có mạng thì chờ có mạng lại mới tưới.
 - Failsafe: mất internet vẫn tưới theo lịch cache lần fetch cuối; events gửi bù khi có mạng lại.
 - Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, sau đó giữ nút BOOT ≥ 3 giây trong 5 giây đầu sau khi boot. Mất WiFi không tự mở hotspot.
 - Hệ thống 1 thiết bị, 1 server; heartbeat xác thực bằng token.
@@ -15,7 +17,7 @@ Chi tiết thiết kế và interface ESP ↔ server: [docs/system-design.md](do
 
 ## Phần cứng
 - Bo mạch ESP32-C3 Super Mini.
-- Mạch đồng hồ DS3231 tích hợp AT24C32.
+- Mạch đồng hồ DS3231 tích hợp AT24C32 (module ZS-042) — **tuỳ chọn**. Cấp nguồn 3.3 V, không cấp 5 V (mạch sạc trên module sẽ sạc pin CR2032).
 - MOSFET IRLB8721 (+ tản nhiệt, diode flyback 10A10).
 - Buck 24V→5V.
 - Bơm rửa xe 12/24V (thiết kế chạy 24V).
@@ -93,5 +95,5 @@ Cổng nạp cấu hình cho macOS (`/dev/cu.usbmodem*` trong `platformio.ini`).
 
 ## Trạng thái triển khai
 
-Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32, heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản; module thời tiết, web-client viết sau.
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32 (hoặc RAM khi không có module), heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản; module thời tiết, web-client viết sau.
 

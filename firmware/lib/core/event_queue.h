@@ -6,10 +6,11 @@
 constexpr uint16_t kQueueCapacity = 200;
 
 // Ring buffer events trên IStorage (layout AT24C32):
-//   0x0000 header {u16 magic=0x4E42, u16 head, u16 count}
+//   0x0000 header {u16 magic=0x4E43, u16 head, u16 count}
 //   0x0008 u32 lastStop
-//   0x0010 records, mỗi record 10 byte {u32 start, u32 stop, u8 source, u8 flags}
-// Tất cả little-endian. Ghi record trước, header sau.
+//   0x0010 records, mỗi record 10 byte {u32 at, u8 type, u8 source, u8 reason, 3 byte dự trữ = 0}
+// Tất cả little-endian. Ghi record trước, header sau. Magic cũ (0x4E42, record {start, stop}) ⇒
+// begin() format một lần.
 class EventQueue {
    public:
     explicit EventQueue(IStorage& s);
