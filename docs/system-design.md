@@ -2,6 +2,8 @@
 
 Ngày chốt: 2026-11-10 · Trạng thái: đã duyệt, chờ linh kiện
 
+Cập nhật 2026-11-10: chốt cách vào chế độ cấu hình (reboot + nút BOOT, không tự mở khi mất WiFi), token xác thực, TLS dùng CA bundle, phân biệt dòng 2 rỗng/thiếu, quy tắc bỏ mốc/tưới bù, trường `capped`/`skipped`, nơi lưu trữ, hệ thống 1 thiết bị.
+
 ## Tổng quan
 
 Hệ thống 2 phần:
@@ -23,14 +25,28 @@ Giao tiếp một chiều duy nhất do ESP chủ động: **mỗi 5 phút POST 
 | Flyback | Diode 10A10 song song bơm | Dập xung ngược khi tắt |
 | Cấp MCU | Buck 24V→5V | Super Mini có regulator 5V→3.3V onboard |
 
-Sơ đồ nối chân chi tiết vẽ bổ sung khi có linh kiện.
+Sơ đồ nối chân chi tiết vẽ bổ sung khi có linh kiện. Ràng buộc đã chốt:
 
-## Setup lần đầu
+- Gate MOSFET: điện trở kéo xuống ~100 kΩ (gate → GND) để bơm **không tự bật** khi ESP đang boot/reset (chân GPIO thả nổi), cộng điện trở nối tiếp ~100 Ω.
+- Chân điều khiển bơm **không dùng GPIO2/8/9** (chân strapping; GPIO8 còn là LED, GPIO9 là nút BOOT).
 
-1. Giữ nút reset khi boot → ESP vào chế độ cấu hình.
-2. ESP phát WiFi `Ner0bit-Setup` (AP mode), captive portal tại `192.168.4.1`.
-3. Form điền: WiFi SSID, WiFi password, **Server URL**.
-4. Lưu vào NVS, khởi động lại, nối WiFi nhà.
+## Setup / cấu hình WiFi
+
+Vào chế độ cấu hình khi:
+
+- Chưa có cấu hình trong NVS (lần đầu), hoặc
+- **Reboot kèm nút BOOT**: nhấn-thả RESET (hoặc cắm lại điện), **sau đó** giữ nút BOOT (GPIO9) ≥ 3 giây trong **5 giây đầu** sau khi boot. LED onboard nháy nhanh trong cửa sổ 5 giây này để báo.
+  - Không giữ BOOT *trong lúc* nhấn RESET/cắm điện — GPIO9 là chân strapping, chip sẽ vào chế độ nạp ROM chứ không chạy firmware.
+  - Chỉ kiểm tra nút BOOT trong cửa sổ lúc boot; khi đang chạy, nhấn BOOT không có tác dụng.
+- **Mất WiFi không tự mở AP** — thiết bị chỉ tiếp tục thử nối lại và tưới theo lịch cache (failsafe). Đổi mật khẩu WiFi nhà ⇒ vào setup bằng reboot + BOOT.
+
+Quy trình:
+
+1. ESP phát WiFi `Ner0bit-Setup` (AP mode, **không mật khẩu**), captive portal tại `192.168.4.1`.
+2. Form điền: WiFi SSID, WiFi password, **Server URL** (bắt buộc `https://`), **Token**.
+3. Lưu vào NVS, khởi động lại, nối WiFi nhà.
+
+Scheduler bơm vẫn chạy bình thường trong lúc ở chế độ cấu hình. Nếu đã có cấu hình cũ mà 10 phút không ai lưu form ⇒ tự reboot về chế độ thường với cấu hình cũ (tránh AP mở mãi khi lỡ vào setup).
 
 ## Interface ESP ↔ Server (cốt lõi — server viết sau phải theo đúng)
 
@@ -39,6 +55,7 @@ Mỗi 5 phút ESP POST tới **Server URL** (URL duy nhất, cấu hình lúc se
 ```
 POST <Server URL>
 Content-Type: application/json
+Authorization: Bearer <Token>
 
 {
   "id": "a4cf12b8e901",
@@ -52,14 +69,29 @@ Content-Type: application/json
       "start": "2026-11-10T07:00:00+07:00",
       "stop":  "2026-11-10T07:05:00+07:00",
       "source": "today"
+    },
+    {
+      "start": "2026-11-10T11:00:00+07:00",
+      "stop":  "2026-11-10T11:30:00+07:00",
+      "source": "today",
+      "capped": true
+    },
+    {
+      "start": "2026-11-10T11:35:00+07:00",
+      "source": "today",
+      "skipped": "rest"
     }
   ]
 }
 ```
 
+- `Authorization`: token bí mật điền lúc setup. Hệ thống chỉ có **1 thiết bị**: server so khớp cả token lẫn `id`; sai một trong hai ⇒ trả 401/403 (ESP coi như lỗi, xem dưới).
 - `id`: định danh thiết bị — MAC address của ESP32 (12 hex, tự sinh). Log tự chứa đủ thông tin, không phụ thuộc URL.
-- `events`: các phiên tưới phát sinh từ heartbeat trước (mảng rỗng nếu không có). Khi offline, events xếp hàng trong flash và gửi bù khi có mạng. Queue giới hạn ~200 events; tràn thì bỏ event cũ nhất.
-- `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (tưới theo cache khi mất mạng).
+- `events`: các phiên tưới phát sinh từ heartbeat trước (mảng rỗng nếu không có). Khi offline, events xếp hàng trong AT24C32 và gửi bù khi có mạng. Queue giới hạn ~200 events; tràn thì bỏ event cũ nhất.
+  - Nhận **HTTP 200** ⇒ ESP xoá các events vừa gửi khỏi queue (kể cả khi lịch trong body parse lỗi). Status khác / timeout ⇒ giữ nguyên, gửi lại lần sau.
+- `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (phiên chạy khi lần fetch gần nhất bị lỗi — mất mạng / server lỗi — dù lịch cache đang dùng là dòng 1 hay dòng 2).
+- `capped`: chỉ có (và = `true`) khi phiên bị cắt bởi hard-cap 30 phút.
+- `skipped`: mốc tới giờ nhưng **không bật bơm**; event này không có `stop`. Giá trị hiện có: `"rest"` (vi phạm thời gian nghỉ 10 phút).
 
 **Response** (HTTP 200, `text/plain`) là lịch tưới, đúng 2 dòng:
 
@@ -71,7 +103,12 @@ Content-Type: application/json
 - Mỗi mốc: `<giây_từ_0h00>[:<duration_giây>]`. Thiếu `:duration` → mặc định 300 giây (5 phút).
   - `25200` = 07:00, tưới 5 phút. `25200:900` = 07:00, tưới 15 phút.
 - **Dòng 1**: lịch thường, lặp mỗi ngày.
-- **Dòng 2**: lịch riêng hôm nay. Có nội dung ⇒ **thay thế hoàn toàn** dòng 1 trong ngày. Rỗng ⇒ hôm nay không tưới (module thời tiết bỏ hẳn ngày mưa). Thiếu dòng ⇒ dùng dòng 1.
+- **Dòng 2**: lịch riêng hôm nay. Có mốc hợp lệ ⇒ **thay thế hoàn toàn** dòng 1 trong ngày. Rỗng ⇒ hôm nay không tưới (module thời tiết bỏ hẳn ngày mưa). Thiếu dòng ⇒ dùng dòng 1.
+- Phân biệt **rỗng** và **thiếu** dòng 2 (quan trọng — hai trường hợp cho kết quả ngược nhau):
+  - Body **có** ký tự `\n` đầu tiên ⇒ có dòng 2 = phần giữa `\n` thứ nhất và `\n` thứ hai (hoặc hết body). `"25200\n"` ⇒ dòng 2 **rỗng** ⇒ hôm nay không tưới.
+  - Body **không có** `\n` nào ⇒ thiếu dòng 2. `"25200"` ⇒ dùng dòng 1.
+  - Dòng 2 có nội dung nhưng **không có mốc hợp lệ nào** (vd. `abc`) ⇒ coi như **thiếu** (dùng dòng 1) — an toàn cho cây hơn là bỏ tưới.
+  - PHP luôn in đủ 2 dòng, kể cả dòng 2 rỗng: `echo "$line1\n$line2";`.
 - Mọi mốc tính theo **giờ Việt Nam (UTC+7)**; server chịu trách nhiệm sinh dòng 2 đúng ngày VN.
 - Qua 0h00, ESP bỏ dòng 2 cũ (không còn "hôm nay"), dùng dòng 1 cho tới lần fetch thành công kế tiếp.
 
@@ -86,12 +123,24 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 - Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (PHP không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
 - HTTPS qua `WiFiClientSecure` (TLS), timeout request 10 giây; network chạy trong FreeRTOS task riêng, không được chặn scheduler bơm (1 giây/lần).
 
+### TLS
+
+- Server public qua **Cloudflare Tunnel** hoặc chứng chỉ **Let's Encrypt** (chưa chốt cái nào).
+- ESP **kiểm tra chứng chỉ** bằng CA bundle nhúng trong firmware (`WiFiClientSecure::setCACertBundle()`), **không** pin một root CA đơn lẻ và **không** `setInsecure()`. Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Bundle dùng được cho cả hai phương án, tốn vài chục KB flash.
+- Không hỗ trợ `http://` (token đi trong header).
+
 ## Scheduler & an toàn bơm
 
 - Mỗi giây so giờ RTC với lịch hiện hành; đến mốc thì bật bơm, tắt sau duration.
 - **Hard-cap 30 phút/phiên** — duration lớn hơn bị cắt còn 30 phút (bơm rửa xe không nên chạy liên tục lâu hơn).
 - **Nghỉ tối thiểu 10 phút** giữa hai lần bật bơm (chống bật/tắt dồn dập — kẻ thù chính của tuổi thọ bơm).
-- Mọi phiên tưới (kể cả bị cap/cắt) đều nằm trong `events` của heartbeat.
+  - Mốc tới giờ mà chưa nghỉ đủ 10 phút ⇒ **bỏ mốc** (không hoãn), ghi event `"skipped": "rest"`.
+  - Thời điểm tắt bơm gần nhất lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot.
+- **Phiên đang chạy luôn chạy nốt** theo duration lúc bắt đầu, kể cả khi lịch mới về giữa chừng hoặc qua 0h00.
+- **Tưới bù**: khi boot hoặc khi nhận lịch mới, nếu thời điểm hiện tại nằm trong khung `[mốc, mốc + duration)` của một mốc và bơm đang tắt ⇒ bật cho **phần thời gian còn lại** (vẫn qua quy tắc nghỉ và hard-cap). Mốc đã qua hẳn khung ⇒ không bù.
+  - Vd. mất điện lúc 07:03 giữa phiên 07:00–07:05, có điện lại 07:04 ⇒ tưới tiếp 1 phút. (Tắt do mất điện không ghi "thời điểm tắt bơm", nên quy tắc nghỉ không chặn phần bù này.)
+  - Phần phiên trước khi mất điện không có event (event chỉ ghi lúc phiên kết thúc) — chấp nhận.
+- Mọi phiên tưới (kể cả bị cap, tưới bù) và mốc bị bỏ đều nằm trong `events` của heartbeat.
 
 ## Đồng bộ thời gian
 
@@ -100,12 +149,19 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 
 ## Failsafe
 
-- Lịch của lần fetch thành công gần nhất được cache trong flash (AT24C32/NVS).
+- Lịch của lần fetch thành công gần nhất được cache trong NVS (chỉ ghi khi nội dung lịch thay đổi).
+
+## Lưu trữ
+
+| Nơi | Dữ liệu | Lý do |
+|---|---|---|
+| NVS (flash ESP32) | WiFi SSID/password, Server URL, Token, lịch cache | Ít khi ghi |
+| AT24C32 (EEPROM 4 KB, ~1 triệu lần ghi) | Queue events (ring buffer, 200 × ~10 B ≈ 2 KB), thời điểm tắt bơm gần nhất | Ghi thường xuyên, không làm mòn flash ESP |
 - Mất WiFi hoặc server chết: ESP vẫn tưới đúng lịch cache theo RTC; `source: "failsafe"` trong events gửi bù khi mạng trở lại.
 
 ## Phần để sau (không thuộc bản này)
 
-- **Module PHP**: endpoint heartbeat + sinh lịch (theo interface trên) + lưu log events.
+- **Module PHP**: endpoint heartbeat + sinh lịch (theo interface trên) + lưu log events. Chỉ phục vụ 1 thiết bị: một lịch duy nhất, kiểm tra token + `id`.
 - **Module thời tiết**: chỉnh dòng 2 theo dự báo.
 - **Web-client**: xem trạng thái thiết bị, sửa lịch.
 - **Enclosure**: đã có file `.blend` ban đầu.

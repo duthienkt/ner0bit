@@ -24,12 +24,14 @@ ner0bit/
 
 Thư mục `server/` sẽ tạo khi bắt đầu viết server.
 
+> **Cập nhật 2026-11-10:** blink đã chuyển sang `playground/blink/` (project PlatformIO riêng). `firmware/` dành cho firmware chính, cũng là project PlatformIO, viết sau. Server nằm ở `php-server/`. Cấu trúc hiện hành xem `readme.md`.
+
 ## Chi tiết kỹ thuật
 
 - Board ESP32-C3 Super Mini → board ID `esp32-c3-devkitm-1`.
 - LED onboard ở **GPIO 8, active-LOW** (mức LOW = LED sáng).
 - USB-native → cần `-DARDUINO_USB_CDC_ON_BOOT=1` để Serial hoạt động.
-- Nạp qua `/dev/cu.usbmodem1101`, tốc độ monitor 115200.
+- Nạp từ macOS qua `/dev/cu.usbmodem*` (wildcard vì số cổng đổi theo cổng USB), tốc độ monitor 115200.
 
 ## Kiểm tra
 
