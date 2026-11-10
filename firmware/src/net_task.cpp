@@ -33,6 +33,7 @@ constexpr uint32_t kHttpTimeoutMs = 10000;
 NetConfig s_cfg;
 char s_id[13];                                  // MAC STA, 12 hex chữ thường
 WiFiClientSecure* s_tls = nullptr;              // cấp một lần trên heap, dùng lại mỗi request
+WiFiClient* s_plain = nullptr;                  // cho Server URL http:// (chỉ dùng thử/demo)
 
 // Buffer lớn để static, không chiếm stack task.
 Event s_events[kMaxEventsPerHeartbeat];
@@ -224,8 +225,10 @@ bool readBody(HTTPClient& http) {
 
 // Gửi một heartbeat. Trả true khi nên gửi tiếp sớm (200 OK và queue còn events).
 bool heartbeat() {
-    if (strncmp(s_cfg.url, "https://", 8) != 0) {
-        Serial.println("[net] lỗi: Server URL không bắt đầu bằng https:// — bỏ qua POST");
+    const bool isHttps = strncmp(s_cfg.url, "https://", 8) == 0;
+    const bool isHttp = strncmp(s_cfg.url, "http://", 7) == 0;
+    if (!isHttps && !isHttp) {
+        Serial.println("[net] lỗi: Server URL không bắt đầu bằng https:// hoặc http:// — bỏ qua POST");
         markFetchFailed();
         return false;
     }
@@ -261,7 +264,8 @@ bool heartbeat() {
     http.setReuse(false);
     http.setConnectTimeout(kHttpTimeoutMs);
     http.setTimeout(kHttpTimeoutMs);
-    if (!http.begin(*s_tls, s_cfg.url)) {
+    // http:// không mã hoá: token, lịch và header Date đều có thể bị đọc/sửa trên đường truyền.
+    if (!http.begin(isHttps ? static_cast<WiFiClient&>(*s_tls) : *s_plain, s_cfg.url)) {
         Serial.println("[net] lỗi: HTTPClient.begin thất bại (URL sai?)");
         markFetchFailed();
         return false;
@@ -332,6 +336,11 @@ void netTask(void*) {
     s_tls = new WiFiClientSecure;
     s_tls->setCACert(kCaBundle);
     s_tls->setHandshakeTimeout(kHttpTimeoutMs / 1000);  // giây
+    s_plain = new WiFiClient;
+    if (strncmp(s_cfg.url, "http://", 7) == 0) {
+        Serial.println("[net] CẢNH BÁO: Server URL dùng http:// — không mã hoá, token và lịch đi dạng rõ."
+                       " Chỉ dùng để thử/demo.");
+    }
 
     sntp_set_time_sync_notification_cb(onNtpSync);
 

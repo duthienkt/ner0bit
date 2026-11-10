@@ -55,7 +55,7 @@ Vào chế độ cấu hình khi:
 Quy trình:
 
 1. ESP phát WiFi `Ner0bit-Setup` (AP mode, **không mật khẩu**), captive portal tại `192.168.4.1`.
-2. Form điền: WiFi SSID, WiFi password, **Server URL** (bắt buộc `https://`), **Token**.
+2. Form điền: WiFi SSID, WiFi password, **Server URL** (`https://`, hoặc `http://` khi thử/demo), **Token**.
    - Lần setup đầu (chưa có cấu hình) **bắt buộc điền Token**.
    - Đã có cấu hình: để trống password/Token ⇒ giữ giá trị cũ. Nhưng **đổi Server URL thì phải nhập lại Token** (AP không mật khẩu — không cho ai đó trỏ thiết bị sang server lạ để nhận token cũ).
 3. Lưu vào NVS, khởi động lại, nối WiFi nhà.
@@ -146,7 +146,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
   - GTS Root R1, GTS Root R3, GTS Root R4 (Google Trust Services)
   - SSL.com Root Certification Authority RSA, SSL.com Root Certification Authority ECC
 - Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Danh sách 7 root dùng được cho cả hai phương án, chỉ tốn ~10 KB flash (nhẹ hơn nhúng cả CA bundle Mozilla qua `setCACertBundle()`). Cập nhật danh sách: nối lại các file PEM như ghi chú đầu `ca_bundle.cpp` rồi build lại.
-- Không hỗ trợ `http://` (token đi trong header).
+- `http://` được chấp nhận **chỉ để thử/demo** (vd. server PHP chạy trong LAN): dùng `WiFiClient` thường, không mã hoá. Token, lịch tưới và header `Date` đi dạng rõ — ai cùng mạng cũng đọc được token, sửa được lịch và giờ. Portal và Serial log đều cảnh báo. Triển khai thật luôn dùng `https://`.
 
 ## Scheduler & an toàn bơm
 

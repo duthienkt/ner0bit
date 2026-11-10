@@ -7,7 +7,7 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 - Kết nối Wi-Fi, mỗi 5 phút POST heartbeat lên server và nhận lịch tưới mới.
 - Tưới theo lịch: bật/tắt bơm đúng mốc giờ (RTC DS3231, độc lập mạng).
 - Failsafe: mất internet vẫn tưới theo lịch cache lần fetch cuối; events gửi bù khi có mạng lại.
-- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS) + Token. Vào lại chế độ cấu hình: nhấn RESET, sau đó giữ nút BOOT ≥ 3 giây trong 5 giây đầu sau khi boot. Mất WiFi không tự mở hotspot.
+- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, sau đó giữ nút BOOT ≥ 3 giây trong 5 giây đầu sau khi boot. Mất WiFi không tự mở hotspot.
 - Hệ thống 1 thiết bị, 1 server; heartbeat xác thực bằng token.
 - An toàn bơm: hard-cap 30 phút/phiên, nghỉ tối thiểu 10 phút giữa 2 lần bật.
 

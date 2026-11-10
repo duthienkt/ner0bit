@@ -89,7 +89,9 @@ void sendForm(int code, const char* error, const String& ssid, const String& url
            "<input id=\"token\" name=\"token\" type=\"password\" maxlength=\"64\"");
     b += hasOld ? F(" placeholder=\"để trống = giữ token cũ\"") : F(" required");
     b += F("><button type=\"submit\">Lưu &amp; khởi động lại</button></form>"
-           "<p class=\"hint\">Server URL bắt buộc bắt đầu bằng https://</p>");
+           "<p class=\"hint\">Server URL: https:// (khuyến nghị) hoặc http://. "
+           "http:// chỉ để thử/demo — không mã hoá, ai cùng mạng cũng đọc được token "
+           "và sửa được lịch tưới.</p>");
     sendPage(code, b);
 }
 
@@ -127,8 +129,9 @@ void handleSave() {
         error = "WiFi SSID quá dài (tối đa 32 byte).";
     } else if (pass.length() >= sizeof cfg.pass) {
         error = "WiFi password quá dài (tối đa 64 byte).";
-    } else if (!url.startsWith("https://") || url.length() <= 8) {
-        error = "Server URL phải bắt đầu bằng https:// (không hỗ trợ http://).";
+    } else if (!((url.startsWith("https://") && url.length() > 8) ||
+                 (url.startsWith("http://") && url.length() > 7))) {
+        error = "Server URL phải bắt đầu bằng https:// hoặc http://.";
     } else if (url.length() >= sizeof cfg.url) {
         error = "Server URL quá dài (tối đa 199 byte).";
     } else if (token.length() >= sizeof cfg.token) {
