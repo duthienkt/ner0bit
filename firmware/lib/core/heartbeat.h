@@ -14,6 +14,7 @@ constexpr int16_t kTempUnknown = INT16_MIN;
 struct HeartbeatInfo {
     const char* id;     // MAC 12 hex chữ thường
     const char* fw;     // vd. "0.2.0"
+    const char* reset;  // lý do reset lần boot này, ASCII ngắn ("poweron", "task_wdt", ...; ≤ 9 ký tự)
     uint32_t uptimeS;
     int rssi;
     bool pumpOn;
@@ -27,8 +28,9 @@ struct HeartbeatInfo {
 };
 
 constexpr uint16_t kMaxEventsPerHeartbeat = 20;
-// Buffer đủ cho trường hợp xấu nhất (mọi số dài nhất, 20 event skipped+failsafe+capped, epoch
-// max): 2058 byte + '\0' — test_heartbeat/test_max_events_fits_buf_size kiểm tra.
+// Buffer đủ cho trường hợp xấu nhất (mọi số dài nhất, reset "deepsleep", 20 event
+// skipped+failsafe+capped, epoch max): 2078 byte + '\0' — test_heartbeat/test_max_events_fits_buf_size
+// kiểm tra.
 constexpr size_t kHeartbeatBufSize = 2304;
 
 // ISO 8601 "YYYY-MM-DDTHH:MM:SS+07:00" từ local epoch; buf ≥ 26 byte

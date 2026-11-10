@@ -89,6 +89,12 @@ constexpr uint8_t kDs3231TempFails = 3;
 // liên tiếp ⇒ g_ds3231 = Failed. Gọi trong lock (lúc heartbeat).
 int16_t readDs3231Temp();
 
+// Lý do khởi động lần này (esp_reset_reason()). Mã ASCII ngắn cho trường "reset" của heartbeat:
+// poweron | sw | panic | int_wdt | task_wdt | wdt | brownout | deepsleep | ext | unknown.
+const char* resetReasonCode();
+// Mô tả tiếng Việt cho log lúc boot, vd. "watchdog (treo)".
+const char* resetReasonText();
+
 // Giây monotonic kể từ boot (esp_timer 64 bit, không wrap như millis()) — ruling R3.
 uint32_t monoSec();
 

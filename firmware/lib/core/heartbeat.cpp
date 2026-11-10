@@ -118,9 +118,9 @@ size_t buildHeartbeat(char* buf, size_t cap, const HeartbeatInfo& h, const Event
     Writer w = {buf, cap, 0, true};
     char ts[26];
 
-    w.add("{\"id\":\"%s\",\"fw\":\"%s\",\"uptime_s\":%lu,\"rssi\":%d,\"pump_on\":%s,"
+    w.add("{\"id\":\"%s\",\"fw\":\"%s\",\"reset\":\"%s\",\"uptime_s\":%lu,\"rssi\":%d,\"pump_on\":%s,"
           "\"heap_free\":%lu,\"heap_min\":%lu,\"ds3231\":\"%s\",\"at24c32\":\"%s\",",
-          h.id, h.fw, (unsigned long)h.uptimeS, h.rssi, h.pumpOn ? "true" : "false", (unsigned long)h.heapFree,
+          h.id, h.fw, h.reset, (unsigned long)h.uptimeS, h.rssi, h.pumpOn ? "true" : "false", (unsigned long)h.heapFree,
           (unsigned long)h.heapMin, moduleName(h.ds3231), moduleName(h.at24c32));
     if (h.tempQuarterC != kTempUnknown) {
         // 0,25 °C/đơn vị ⇒ phần lẻ luôn .00/.25/.50/.75; in bằng số nguyên, không dùng float.
