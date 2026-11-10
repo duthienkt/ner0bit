@@ -1,3 +1,4 @@
 .env
 data/*
 !data/schedule.example.json
+/server
