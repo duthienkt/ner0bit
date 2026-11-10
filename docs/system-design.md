@@ -4,6 +4,8 @@ Ngày chốt: 2026-11-10 · Trạng thái: đã duyệt, chờ linh kiện
 
 Cập nhật 2026-11-10: chốt cách vào chế độ cấu hình (reboot + nút BOOT, không tự mở khi mất WiFi), token xác thực, TLS dùng CA bundle, phân biệt dòng 2 rỗng/thiếu, quy tắc bỏ mốc/tưới bù, trường `capped`/`skipped`, nơi lưu trữ, hệ thống 1 thiết bị.
 
+Cập nhật 2026-11-10 (firmware): TLS dùng `setCACert()` với PEM nối 7 root thay cho `setCACertBundle()`; thêm bảng gán chân tạm.
+
 ## Tổng quan
 
 Hệ thống 2 phần:
@@ -29,6 +31,16 @@ Sơ đồ nối chân chi tiết vẽ bổ sung khi có linh kiện. Ràng buộ
 
 - Gate MOSFET: điện trở kéo xuống ~100 kΩ (gate → GND) để bơm **không tự bật** khi ESP đang boot/reset (chân GPIO thả nổi), cộng điện trở nối tiếp ~100 Ω.
 - Chân điều khiển bơm **không dùng GPIO2/8/9** (chân strapping; GPIO8 còn là LED, GPIO9 là nút BOOT).
+
+Gán chân **tạm** (firmware đang dùng, gom trong `firmware/src/pins.h`) — chỉ chốt khi có sơ đồ nối chân:
+
+| Chức năng | GPIO | Ghi chú |
+|---|---|---|
+| Gate MOSFET bơm (`PUMP_PIN`) | 4 | HIGH = bơm chạy; firmware kéo LOW ngay đầu `setup()` |
+| I2C SDA (`I2C_SDA`) | 5 | DS3231 `0x68` + AT24C32 `0x57`, 100 kHz |
+| I2C SCL (`I2C_SCL`) | 6 | |
+| LED onboard (`LED_PIN`) | 8 | Active-LOW; nháy nhanh trong cửa sổ BOOT, sáng liên tục khi ở chế độ cấu hình |
+| Nút BOOT (`BOOT_BUTTON_PIN`) | 9 | Active-LOW, `INPUT_PULLUP` |
 
 ## Setup / cấu hình WiFi
 
@@ -126,7 +138,11 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 ### TLS
 
 - Server public qua **Cloudflare Tunnel** hoặc chứng chỉ **Let's Encrypt** (chưa chốt cái nào).
-- ESP **kiểm tra chứng chỉ** bằng CA bundle nhúng trong firmware (`WiFiClientSecure::setCACertBundle()`), **không** pin một root CA đơn lẻ và **không** `setInsecure()`. Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Bundle dùng được cho cả hai phương án, tốn vài chục KB flash.
+- ESP **kiểm tra chứng chỉ** bằng nhiều root CA nhúng trong firmware: `WiFiClientSecure::setCACert()` với **một chuỗi PEM nối 7 root** (`firmware/src/ca_bundle.cpp`), **không** pin một root CA đơn lẻ và **không** `setInsecure()`. 7 root:
+  - ISRG Root X1, ISRG Root X2 (Let's Encrypt)
+  - GTS Root R1, GTS Root R3, GTS Root R4 (Google Trust Services)
+  - SSL.com Root Certification Authority RSA, SSL.com Root Certification Authority ECC
+- Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Danh sách 7 root dùng được cho cả hai phương án, chỉ tốn ~10 KB flash (nhẹ hơn nhúng cả CA bundle Mozilla qua `setCACertBundle()`). Cập nhật danh sách: nối lại các file PEM như ghi chú đầu `ca_bundle.cpp` rồi build lại.
 - Không hỗ trợ `http://` (token đi trong header).
 
 ## Scheduler & an toàn bơm

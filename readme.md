@@ -27,7 +27,7 @@ Chi tiết thiết kế và interface ESP ↔ server: [docs/system-design.md](do
 
 ```
 ner0bit/
-├── firmware/          # Firmware ESP32-C3 chính — project PlatformIO (chưa viết)
+├── firmware/          # Firmware ESP32-C3 chính — project PlatformIO
 ├── playground/        # Code thử nghiệm
 │   └── blink/         # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
 ├── php-server/        # Server PHP: heartbeat + sinh lịch (viết sau, theo interface trong docs)
@@ -37,6 +37,20 @@ ner0bit/
 │   └── system-design.md
 └── assets/            # Logo, hình ảnh
 ```
+
+## Build firmware
+
+Yêu cầu: [PlatformIO](https://platformio.org/) (extension VSCode hoặc CLI `pio`).
+
+```bash
+cd firmware
+pio test -e native   # unit test logic lõi (lib/core) trên máy host
+pio run              # build cho ESP32-C3
+pio run -t upload    # nạp vào board
+pio device monitor   # xem Serial log (Ctrl+C để thoát)
+```
+
+Gán chân tạm nằm trong `firmware/src/pins.h` (bảng trong [docs/system-design.md](docs/system-design.md), mục Phần cứng & điện).
 
 ## Chạy code thử nghiệm
 
@@ -55,5 +69,5 @@ Cổng nạp cấu hình cho macOS (`/dev/cu.usbmodem*` trong `platformio.ini`).
 
 ## Trạng thái triển khai
 
-Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Đang chờ linh kiện để dựng mạch và viết firmware.
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32, heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server PHP, web-client viết sau.
 

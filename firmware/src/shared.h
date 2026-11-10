@@ -31,6 +31,11 @@ bool localNow(uint32_t& out);
 // Giây monotonic kể từ boot (esp_timer 64 bit, không wrap như millis()) — ruling R3.
 uint32_t monoSec();
 
+// Một nhịp scheduler bơm. Gọi thường xuyên từ loop() và từ vòng lặp portal; tự giới hạn
+// tối đa 1 tick / 1000 ms. Tự lấy g_lock. Đồng hồ không dùng được (!g_clockValid hoặc đọc
+// DS3231 lỗi — ruling R4) ⇒ tắt bơm và bỏ tick.
+void schedulerTick();
+
 // RAII: lấy g_lock trong phạm vi khối.
 class SharedLock {
 public:
