@@ -85,6 +85,21 @@ Quy trình:
 
 Scheduler bơm vẫn chạy bình thường trong lúc ở chế độ cấu hình. Nếu đã có cấu hình cũ mà 10 phút không ai lưu form ⇒ tự reboot về chế độ thường với cấu hình cũ (tránh AP mở mãi khi lỡ vào setup).
 
+## Đèn báo (LED onboard GPIO 8)
+
+Ưu tiên từ trên xuống — trạng thái trên che trạng thái dưới:
+
+| Trạng thái | Đèn |
+|---|---|
+| Cửa sổ 5 giây lúc boot (chờ giữ BOOT) | chớp rất nhanh 100 ms |
+| Chế độ cấu hình (portal) | sáng liên tục |
+| Bơm đang chạy | chớp nhanh 150 ms sáng / 150 ms tắt |
+| Chưa có giờ hợp lệ (không tưới được) | chớp đôi mỗi 2 giây |
+| Đang kết nối / mất WiFi | chớp dài 1 giây sáng / 1 giây tắt |
+| Bình thường (chờ mốc) | nháy ngắn 50 ms mỗi 5 giây |
+
+Logic nhịp: `firmware/lib/core/led_pattern.*` (có test native).
+
 ## Interface ESP ↔ Server (cốt lõi — server viết sau phải theo đúng)
 
 ESP POST tới **Server URL** (URL duy nhất, cấu hình lúc setup):
