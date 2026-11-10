@@ -388,7 +388,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   'use strict';
 
   // Quy tắc của firmware (docs/system-design.md, "Scheduler & an toàn bơm").
-  var DEF_DUR = 300, CAP = 1800, REST = 600, MAX_ENTRIES = 20, DAY = 86400;
+  var DEF_DUR = 300, CAP = 1800, REST = 180, MAX_ENTRIES = 20, DAY = 86400;
   var VN_OFFSET = 7 * 3600 * 1000;
   var WEEKDAYS = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
   var EVENT_TYPE = { start: 'Bật bơm', stop: 'Tắt bơm', skipped: 'Bỏ mốc' };
@@ -397,7 +397,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     done: 'tưới đủ thời lượng',
     capped: 'bị cắt ở giới hạn 30 phút',
     abort: 'dừng giữa chừng (đồng hồ lỗi hoặc thiết bị khởi động lại)',
-    rest: 'chưa nghỉ đủ 10 phút từ lần tắt trước',
+    rest: 'chưa nghỉ đủ 3 phút từ lần tắt trước',
     busy: 'bơm đang chạy phiên khác'
   };
   var MODULE = {
@@ -549,7 +549,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
         notes[i].push('Bơm còn đang chạy mốc trước nên mốc này sẽ bị bỏ.');
       } else if (e.sec < lastEnd + REST) {
         skipped[i] = true;
-        notes[i].push('Chưa nghỉ đủ 10 phút sau mốc trước nên mốc này sẽ bị bỏ.');
+        notes[i].push('Chưa nghỉ đủ 3 phút sau mốc trước nên mốc này sẽ bị bỏ.');
       } else {
         lastEnd = e.sec + Math.min(e.dur, CAP);
       }
@@ -1099,7 +1099,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (analyze(day.entries).skipped[idx]) {
       model = before;
       renderSchedule(); changed();
-      toast('Mốc ' + when + ' quá gần mốc khác (bơm cần nghỉ 10 phút giữa hai lần) nên thiết bị sẽ bỏ qua. Chưa thêm; hãy chọn số phút khác.', true);
+      toast('Mốc ' + when + ' quá gần mốc khác (bơm cần nghỉ 3 phút giữa hai lần) nên thiết bị sẽ bỏ qua. Chưa thêm; hãy chọn số phút khác.', true);
       return;
     }
     save('Đã thêm mốc tưới thử ' + when + ' và lưu lịch. Thiết bị nhận ở heartbeat kế tiếp (tối đa 5 phút).');
