@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY *.go ./
+COPY ui ./ui
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ner0bit-server . \
  && mkdir -p /out/data
 

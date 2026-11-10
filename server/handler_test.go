@@ -125,11 +125,12 @@ func TestHeartbeatBadRequests(t *testing.T) {
 	if rec := post(s, "Bearer "+testToken, big); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("body quá lớn: code %d", rec.Code)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	// GET / giờ là trang UI; method lạ vẫn 405.
+	req := httptest.NewRequest(http.MethodPut, "/", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("GET: code %d", rec.Code)
+		t.Errorf("PUT: code %d", rec.Code)
 	}
 }
 

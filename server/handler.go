@@ -21,14 +21,32 @@ const maxBodyBytes = 64 << 10
 // Giờ Việt Nam (UTC+7, không DST) — không phụ thuộc tzdata trong image.
 var vietnam = time.FixedZone("ICT", 7*3600)
 
-// Server xử lý POST heartbeat từ thiết bị (docs/system-design.md, "Interface ESP ↔ Server").
+// Server xử lý POST heartbeat từ thiết bị (docs/system-design.md, "Interface ESP ↔ Server")
+// và giao diện web (ui.go).
 type Server struct {
-	Token    string           // so với header "Authorization: Bearer <token>"
-	DeviceID string           // MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
-	DataDir  string           // chứa schedule.json, heartbeats.jsonl, events.jsonl
-	Now      func() time.Time // nil ⇒ time.Now
+	Token      string           // so với header "Authorization: Bearer <token>"
+	DeviceID   string           // MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
+	DataDir    string           // chứa schedule.json, heartbeats.jsonl, events.jsonl
+	UIPassword string           // mật khẩu giao diện web; rỗng ⇒ tắt UI
+	Now        func() time.Time // nil ⇒ time.Now
 
-	mu sync.Mutex // tuần tự hoá ghi file log
+	mu sync.Mutex // tuần tự hoá ghi/đọc file log
+
+	routesOnce sync.Once
+	handler    http.Handler
+
+	lastMu sync.Mutex
+	last   *lastHeartbeat // heartbeat cuối nhận được (nil ⇒ chưa có)
+
+	scheduleMu sync.Mutex // tuần tự hoá PUT /api/schedule
+
+	loginMu    sync.Mutex
+	loginFails map[string]*loginFailures // theo IP client
+}
+
+type lastHeartbeat struct {
+	at  time.Time
+	raw json.RawMessage
 }
 
 type heartbeat struct {
@@ -44,11 +62,12 @@ func (s *Server) now() time.Time {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	s.routesOnce.Do(func() { s.handler = s.routes() })
+	s.handler.ServeHTTP(w, r)
+}
+
+// handleHeartbeat: POST từ thiết bị. Nhận ở mọi path (như trước khi có UI) trừ các route UI.
+func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(r.Header.Get("Authorization")) {
 		log.Printf("từ chối %s: token sai/thiếu", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -92,6 +111,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
+	s.setLastHeartbeat(now, raw)
 
 	body := sched.render(now.In(vietnam).Format(time.DateOnly))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

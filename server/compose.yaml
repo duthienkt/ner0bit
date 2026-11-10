@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    env_file: .env          # NER0BIT_TOKEN, NER0BIT_DEVICE_ID (xem .env.example)
+    env_file: .env          # NER0BIT_TOKEN, NER0BIT_DEVICE_ID, NER0BIT_UI_PASSWORD (xem .env.example)
     user: "${UID:-1000}:${GID:-1000}"   # trùng chủ thư mục ./data để sửa schedule.json từ máy host
     volumes:
       - ./data:/data

@@ -32,8 +32,8 @@ ner0bit/
 ├── firmware/          # Firmware ESP32-C3 chính — project PlatformIO
 ├── playground/        # Code thử nghiệm
 │   └── blink/         # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
-├── server/            # Server Go: nhận heartbeat, trả lịch tưới (Docker)
-├── web-client/        # Web UI xem trạng thái + sửa lịch (viết sau)
+├── server/            # Server Go: nhận heartbeat, trả lịch tưới, giao diện web (Docker)
+├── web-client/        # Chỗ trống cũ — giao diện web thật nằm ở server/ui/
 ├── enclosure-design/  # Hộp đựng (Blender)
 ├── docs/              # Tài liệu, thiết kế
 │   └── system-design.md
@@ -56,11 +56,11 @@ Gán chân tạm nằm trong `firmware/src/pins.h` (bảng trong [docs/system-de
 
 ## Server (Go)
 
-Nhận heartbeat của thiết bị, ghi log, trả lịch tưới. Lịch sửa tay trong `server/data/schedule.json` — server đọc lại mỗi request, không cần restart.
+Nhận heartbeat của thiết bị, ghi log, trả lịch tưới. Lịch sửa trên giao diện web hoặc sửa tay trong `server/data/schedule.json` — server đọc lại mỗi request, không cần restart.
 
 ```bash
 cd server
-cp .env.example .env                                  # điền NER0BIT_TOKEN (+ NER0BIT_DEVICE_ID)
+cp .env.example .env                                  # điền NER0BIT_TOKEN (+ NER0BIT_DEVICE_ID, NER0BIT_UI_PASSWORD)
 cp data/schedule.example.json data/schedule.json      # sửa lịch
 docker compose up -d --build                          # lắng nghe :8080 (HTTP)
 go test ./...                                         # test (cần Go 1.24+)
@@ -75,6 +75,18 @@ go test ./...                                         # test (cần Go 1.24+)
 - `daily`: dòng 1, lặp mỗi ngày (`<giây từ 0h>[:<giây tưới>]`, mặc định 300 giây).
 - `days`: lịch riêng theo ngày (giờ VN) — `""` = hôm đó không tưới, có mốc = thay `daily` trong ngày.
 - File sai ⇒ server trả 503, thiết bị giữ lịch cũ; lỗi ghi trong log container.
+
+### Giao diện web
+
+Mở URL server bằng trình duyệt (điện thoại hoặc máy tính), đăng nhập bằng `NER0BIT_UI_PASSWORD`:
+
+- Trạng thái thiết bị: online (heartbeat ≤ 15 phút), bơm bật/tắt, nhiệt độ, WiFi, bộ nhớ, module DS3231/AT24C32, hàng đợi event, giờ thiết bị.
+- Dải 24 giờ hôm nay: các mốc theo lịch server trả và các lần bơm chạy thật (từ events).
+- Sửa lịch hằng ngày và lịch riêng theo ngày (hoặc "không tưới"), có cảnh báo mốc > 30 phút (bị cắt) và mốc sẽ bị bỏ vì chưa nghỉ đủ 10 phút. Lưu là ghi thẳng `schedule.json` (atomic).
+- "Tưới thử": thêm mốc 5 phút cho hôm nay sau N phút (mặc định 7) rồi lưu ngay. Thiết bị nhận lịch ở heartbeat kế tiếp (≤ 5 phút).
+- Hoạt động gần đây: bật/tắt/bỏ mốc, nguồn, lý do. Trang tự làm mới mỗi 15 giây.
+
+`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP, lấy `CF-Connecting-IP` nếu có) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
 
 Log: `data/heartbeats.jsonl`, `data/events.jsonl` (mỗi dòng một JSON). Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
 
@@ -95,5 +107,5 @@ Cổng nạp cấu hình cho macOS (`/dev/cu.usbmodem*` trong `platformio.ini`).
 
 ## Trạng thái triển khai
 
-Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32 (hoặc RAM khi không có module), heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản; module thời tiết, web-client viết sau.
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32 (hoặc RAM khi không có module), heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản kèm giao diện web xem trạng thái, sửa lịch; module thời tiết viết sau.
 
