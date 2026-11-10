@@ -225,7 +225,7 @@ void test_skipped_entry_not_reported_twice() {
     Scheduler s;
     s.setSchedule(sch("25200:300"), D);
     s.setFetchOk(true);
-    s.setLastStop(T(D, 6, 58, 0));  // nghỉ chưa đủ 600s
+    s.setLastStop(T(D, 6, 58, 0));  // nghỉ chưa đủ 180s
     TickResult r = s.tick(T(D, 7, 0, 0), 0);
     TEST_ASSERT_FALSE(r.pumpOn);
     expectSkipped(r, T(D, 7, 0, 0), Source::Normal, Reason::Rest);
@@ -269,18 +269,18 @@ void test_persisted_future_lastStop_blocks() {
     expectSkipped(r, T(D, 7, 0, 0), Source::Normal, Reason::Rest);
 }
 
-void test_rest_boundary_599_600() {
+void test_rest_boundary_179_180() {
     Scheduler s;
     s.setSchedule(sch("25200:300"), D);
     s.setFetchOk(true);
-    s.setLastStop(T(D, 6, 50, 1));  // 599s
+    s.setLastStop(T(D, 6, 57, 1));  // 179s
     TickResult r = s.tick(T(D, 7, 0, 0), 0);
     TEST_ASSERT_FALSE(r.pumpOn);
     expectSkipped(r, T(D, 7, 0, 0), Source::Normal, Reason::Rest);
     Scheduler s2;
     s2.setSchedule(sch("25200:300"), D);
     s2.setFetchOk(true);
-    s2.setLastStop(T(D, 6, 50, 0));  // 600s
+    s2.setLastStop(T(D, 6, 57, 0));  // 180s
     r = s2.tick(T(D, 7, 0, 0), 0);
     expectStart(r, T(D, 7, 0, 0), Source::Normal);
 }
@@ -467,17 +467,17 @@ void test_abort_while_running_ends_session() {
 
 void test_abort_applies_rest_to_next_entry() {
     Scheduler s;
-    s.setSchedule(sch("25200:900,25500,26100"), D);  // 07:00, 07:05, 07:15
+    s.setSchedule(sch("25200:900,25440,25560"), D);  // 07:00, 07:04, 07:06
     s.setFetchOk(true);
     TickResult r = s.tick(T(D, 7, 0, 0), 100);
     expectStart(r, T(D, 7, 0, 0), Source::Normal);
     r = s.abort(220);  // dừng lúc 07:02
     expectStop(r, T(D, 7, 2, 0), Source::Normal, Reason::Abort);
-    r = s.tick(T(D, 7, 5, 0), 400);  // mới nghỉ 180 s
+    r = s.tick(T(D, 7, 4, 0), 340);  // mới nghỉ 120 s
     TEST_ASSERT_FALSE(r.pumpOn);
-    expectSkipped(r, T(D, 7, 5, 0), Source::Normal, Reason::Rest);
-    r = s.tick(T(D, 7, 15, 0), 1000);  // nghỉ 780 s
-    expectStart(r, T(D, 7, 15, 0), Source::Normal);
+    expectSkipped(r, T(D, 7, 4, 0), Source::Normal, Reason::Rest);
+    r = s.tick(T(D, 7, 6, 0), 460);  // nghỉ 240 s
+    expectStart(r, T(D, 7, 6, 0), Source::Normal);
 }
 
 void test_abort_stop_clamped_to_session_duration() {
@@ -540,7 +540,7 @@ int main() {
     RUN_TEST(test_no_schedule_does_nothing);
     RUN_TEST(test_rest_survives_backward_clock_jump);
     RUN_TEST(test_persisted_future_lastStop_blocks);
-    RUN_TEST(test_rest_boundary_599_600);
+    RUN_TEST(test_rest_boundary_179_180);
     RUN_TEST(test_resume_across_midnight);
     RUN_TEST(test_earliest_open_window_wins);
     RUN_TEST(test_midnight_catchup_uses_yesterday_line2);

@@ -42,7 +42,7 @@ void test_garbage_is_invalid() {
     TEST_ASSERT_FALSE(retainedStopValid(badMagic, false));
 }
 
-// Chế độ RAM: storage = 0 ⇒ lấy bản sao (tắt 06:30, reset 06:31 ⇒ mốc 06:35 vẫn bị nghỉ).
+// Chế độ RAM: storage = 0 ⇒ lấy bản sao (tắt 06:30, reset 06:31 ⇒ mốc 06:32 vẫn bị nghỉ).
 void test_seed_ram_mode_uses_copy() {
     TEST_ASSERT_EQUAL_UINT32(kStop, retainedStopSeed(0, written(kStop), false));
 }
