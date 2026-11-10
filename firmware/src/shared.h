@@ -31,6 +31,11 @@ constexpr size_t kScheduleBodyMax = 1024;
 // Tạo g_lock. Gọi một lần trong setup(), trước mọi truy cập dùng lock và trước startNetTask().
 void sharedInit();
 
+// Yêu cầu vào chế độ cấu hình ở lần khởi động kế tiếp (lệnh "setup" qua Serial). Cờ nằm trong RTC
+// memory: giữ qua ESP.restart(), mất khi mất điện. consumeSetupRequest() đọc rồi xoá cờ.
+void requestSetupOnNextBoot();
+bool consumeSetupRequest();
+
 // Log ra Serial, mỗi dòng có tiền tố giờ: "17:38:13 " (giờ VN, khi đồng hồ hợp lệ) hoặc
 // "+12s " (uptime, khi chưa có giờ). Cả dòng in một lần dưới khoá riêng ⇒ 2 task không chen nhau.
 void nlog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // fmt tự kèm '\n'

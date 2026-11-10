@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <string.h>
 #include <esp_task_wdt.h>
 
 #include "config_store.h"
@@ -127,7 +128,10 @@ void setup() {
     digitalWrite(LED_PIN, HIGH);
 
     // 2. Cửa sổ 5 s: giữ BOOT ≥ 3 s ⇒ chế độ cấu hình.
-    const bool button = portal::bootButtonHeld();
+    // Lệnh "setup" qua Serial ⇒ đã đặt cờ trước khi restart: vào thẳng setup, bỏ cửa sổ nút BOOT.
+    const bool serialSetup = consumeSetupRequest();
+    const bool button = serialSetup || portal::bootButtonHeld();
+    if (serialSetup) nlogln("[main] vào chế độ cấu hình theo lệnh \"setup\" qua Serial");
     nlog("[main] Ner0bit fw %s, nút BOOT: %s\n", kFwVersion, button ? "giữ ⇒ setup" : "không");
     nlog("[main] lý do khởi động: %s\n", resetReasonText());
 
@@ -192,8 +196,33 @@ void setup() {
     startNetTask(s_cfg);
 }
 
+// Lệnh qua Serial (pio device monitor): gõ "setup" + Enter ⇒ khởi động lại vào chế độ cấu hình.
+static void pollSerialCommand() {
+    static char line[16];
+    static uint8_t len = 0;
+    while (Serial.available() > 0) {
+        const int c = Serial.read();
+        if (c == '\r' || c == '\n') {
+            line[len] = '\0';
+            if (len > 0 && strcmp(line, "setup") == 0) {
+                nlogln("[main] lệnh \"setup\": tắt bơm, khởi động lại vào chế độ cấu hình");
+                stopPumpForRestart();
+                requestSetupOnNextBoot();
+                delay(100);  // cho log kịp ra
+                ESP.restart();
+            } else if (len > 0) {
+                nlog("[main] lệnh không rõ \"%s\" (có: setup)\n", line);
+            }
+            len = 0;
+        } else if (len < sizeof line - 1) {
+            line[len++] = (char)c;
+        }
+    }
+}
+
 void loop() {  // core nuôi watchdog trước mỗi lần gọi loop()
     schedulerTick();  // tự giới hạn 1 lần / 1000 ms
+    pollSerialCommand();
     checkNetTask();   // sau tick: pump::isOn() là trạng thái mới nhất
     // Đèn báo trạng thái (active-LOW): bơm chạy chớp nhanh, chưa có giờ chớp đôi, mất WiFi chớp
     // dài, bình thường nháy ngắn mỗi 5 s. Đọc trạng thái không cần g_lock (chỉ để hiển thị).

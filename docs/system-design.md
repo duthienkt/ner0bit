@@ -70,7 +70,8 @@ Gán chân **tạm** (firmware đang dùng, gom trong `firmware/src/pins.h`) —
 Vào chế độ cấu hình khi:
 
 - Chưa có cấu hình trong NVS (lần đầu), hoặc
-- **Reboot kèm nút BOOT**: nhấn-thả RESET (hoặc cắm lại điện), **sau đó** giữ nút BOOT (GPIO9) ≥ 3 giây trong **5 giây đầu** sau khi boot. LED onboard nháy nhanh trong cửa sổ 5 giây này để báo.
+- **Reboot kèm nút BOOT**: nhấn-thả RESET (hoặc cắm lại điện), **sau đó bắt đầu nhấn** nút BOOT (GPIO9) trong **5 giây đầu** (LED chớp nhanh) và **giữ liên tục 3 giây** (LED sáng liên tục khi đang giữ). Đã bắt đầu giữ trong cửa sổ thì vẫn tính đủ 3 giây dù quá 5 giây.
+- **Lệnh `setup` qua Serial**: gõ `setup` + Enter trong `pio device monitor` ⇒ tắt bơm, khởi động lại thẳng vào chế độ cấu hình (cờ trong RTC memory, mất khi mất điện).
   - Không giữ BOOT *trong lúc* nhấn RESET/cắm điện — GPIO9 là chân strapping, chip sẽ vào chế độ nạp ROM chứ không chạy firmware.
   - Chỉ kiểm tra nút BOOT trong cửa sổ lúc boot; khi đang chạy, nhấn BOOT không có tác dụng.
 - **Mất WiFi không tự mở AP** — thiết bị chỉ tiếp tục thử nối lại và tưới theo lịch cache (failsafe). Đổi mật khẩu WiFi nhà ⇒ vào setup bằng reboot + BOOT.
@@ -91,7 +92,7 @@ Scheduler bơm vẫn chạy bình thường trong lúc ở chế độ cấu hì
 
 | Trạng thái | Đèn |
 |---|---|
-| Cửa sổ 5 giây lúc boot (chờ giữ BOOT) | chớp rất nhanh 100 ms |
+| Cửa sổ 5 giây lúc boot (chờ giữ BOOT) | chớp rất nhanh 100 ms; **sáng liên tục khi đang giữ BOOT** |
 | Chế độ cấu hình (portal) | sáng liên tục |
 | Bơm đang chạy | chớp nhanh 150 ms sáng / 150 ms tắt |
 | Chưa có giờ hợp lệ (không tưới được) | chớp đôi mỗi 2 giây |

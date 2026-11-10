@@ -65,6 +65,8 @@ uint32_t s_generation = 0;
 // Bản sao lastStop giữ qua reset mềm / WDT / panic / brownout (không được khởi tạo lúc boot).
 // Cập nhật cùng lúc với lastStop trong queue, ở cả hai chế độ storage. Xem retained_stop.h.
 RTC_NOINIT_ATTR RetainedStop s_retainedStop;
+RTC_NOINIT_ATTR uint32_t s_setupRequest;  // = kSetupMagic ⇒ boot vào chế độ cấu hình
+constexpr uint32_t kSetupMagic = 0x53455455;  // "SETU"
 
 // Ghi lastStop xuống queue (AT24C32 / RAM) và bản sao giữ qua reset. Gọi trong lock.
 void writeLastStop(uint32_t v) {
@@ -361,4 +363,12 @@ void stopPumpForRestart() {
     if (switched) logStorageFailover();
     if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy trước khi khởi động lại");
     logEvent(r);
+}
+
+void requestSetupOnNextBoot() { s_setupRequest = kSetupMagic; }
+
+bool consumeSetupRequest() {
+    const bool req = s_setupRequest == kSetupMagic && esp_reset_reason() != ESP_RST_POWERON;
+    s_setupRequest = 0;
+    return req;
 }
