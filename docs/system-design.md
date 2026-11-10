@@ -58,7 +58,7 @@ Content-Type: application/json
 ```
 
 - `id`: định danh thiết bị — MAC address của ESP32 (12 hex, tự sinh). Log tự chứa đủ thông tin, không phụ thuộc URL.
-- `events`: các phiên tưới phát sinh từ heartbeat trước (mảng rỗng nếu không có). Khi offline, events xếp hàng trong flash và gửi bù khi có mạng.
+- `events`: các phiên tưới phát sinh từ heartbeat trước (mảng rỗng nếu không có). Khi offline, events xếp hàng trong flash và gửi bù khi có mạng. Queue giới hạn ~200 events; tràn thì bỏ event cũ nhất.
 - `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (tưới theo cache khi mất mạng).
 
 **Response** (HTTP 200, `text/plain`) là lịch tưới, đúng 2 dòng:
