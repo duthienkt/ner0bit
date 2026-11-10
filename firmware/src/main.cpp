@@ -3,9 +3,11 @@
 // WiFi, NTP, heartbeat. Module DS3231 + AT24C32 tuỳ chọn (xem shared.h).
 // Chế độ cấu hình (portal) thay cho network task khi chưa có cấu hình hoặc giữ BOOT lúc boot.
 #include <Arduino.h>
+#include <WiFi.h>
 #include <Wire.h>
 
 #include "config_store.h"
+#include "led_pattern.h"
 #include "net_task.h"
 #include "pins.h"
 #include "portal.h"
@@ -134,5 +136,9 @@ void setup() {
 
 void loop() {
     schedulerTick();  // tự giới hạn 1 lần / 1000 ms
+    // Đèn báo trạng thái (active-LOW): bơm chạy chớp nhanh, chưa có giờ chớp đôi, mất WiFi chớp
+    // dài, bình thường nháy ngắn mỗi 5 s. Đọc trạng thái không cần g_lock (chỉ để hiển thị).
+    const LedState led = pickLed(pump::isOn(), g_clockValid, WiFi.isConnected());
+    digitalWrite(LED_PIN, ledOn(led, millis()) ? LOW : HIGH);
     delay(20);
 }
