@@ -66,14 +66,14 @@ void makeId() {
 }
 
 void wifiBegin() {
-    Serial.printf("[net] WiFi: kết nối SSID \"%s\"\n", s_cfg.ssid);
+    nlog("[net] WiFi: kết nối SSID \"%s\"\n", s_cfg.ssid);
     WiFi.disconnect();
     WiFi.begin(s_cfg.ssid, s_cfg.pass);
 }
 
 // (Re)start SNTP. Lần sync kế tiếp do lwIP tự làm theo chu kỳ kNtpIntervalS.
 void ntpStart() {
-    Serial.println("[net] NTP: bắt đầu sync (pool.ntp.org, time.google.com)");
+    nlogln("[net] NTP: bắt đầu sync (pool.ntp.org, time.google.com)");
     sntp_set_sync_interval(kNtpIntervalS * 1000UL);
     configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
@@ -129,13 +129,13 @@ bool ntpApply(int64_t ntpUs, int64_t atUs) {
     const bool anchored = s_trust.anchorNow(mono, ref);
     if (v == NtpVerdict::Reject) {
         if (ntp < kMinValidUtc || ntp >= kMaxValidUtc) {
-            Serial.printf("[net] NTP: giờ vô lý (%lu), bỏ qua\n", (unsigned long)ntp);
+            nlog("[net] NTP: giờ vô lý (%lu), bỏ qua\n", (unsigned long)ntp);
         } else if (anchored) {
-            Serial.printf("[net] NTP: lệch %lld s so với neo header Date (> %lu s) — bỏ qua, có "
+            nlog("[net] NTP: lệch %lld s so với neo header Date (> %lu s) — bỏ qua, có "
                           "thể bị giả mạo\n",
                           (long long)ntp - (long long)ref, (unsigned long)kTrustWindowS);
         } else {
-            Serial.printf("[net] NTP: lệch %lld s so với đồng hồ (> %lu s), chưa có neo header "
+            nlog("[net] NTP: lệch %lld s so với đồng hồ (> %lu s), chưa có neo header "
                           "Date — bỏ qua, chờ heartbeat\n",
                           (long long)ntp - (long long)sys, (unsigned long)kTrustWindowS);
             return true;
@@ -143,10 +143,10 @@ bool ntpApply(int64_t ntpUs, int64_t atUs) {
         return false;
     }
     if (wasValid) {
-        Serial.printf("[net] NTP: đã tinh chỉnh đồng hồ utc=%lu (lệch %lld s)%s\n",
+        nlog("[net] NTP: đã tinh chỉnh đồng hồ utc=%lu (lệch %lld s)%s\n",
                       (unsigned long)ntp, (long long)ntp - (long long)sys, rtcNote(rw));
     } else {
-        Serial.printf("[net] NTP: đã đặt đồng hồ utc=%lu (trước đó chưa hợp lệ)%s\n",
+        nlog("[net] NTP: đã đặt đồng hồ utc=%lu (trước đó chưa hợp lệ)%s\n",
                       (unsigned long)ntp, rtcNote(rw));
     }
     return !wasValid;
@@ -158,7 +158,7 @@ bool ntpApply(int64_t ntpUs, int64_t atUs) {
 void applyServerDate(const char* date, uint32_t respMono) {
     uint32_t dateUtc = 0;
     if (!parseHttpDate(date, dateUtc)) {
-        Serial.printf("[net] Date: header thiếu hoặc sai định dạng (\"%s\"), không neo được giờ\n",
+        nlog("[net] Date: header thiếu hoặc sai định dạng (\"%s\"), không neo được giờ\n",
                       date);
         return;
     }
@@ -176,7 +176,7 @@ void applyServerDate(const char* date, uint32_t respMono) {
     }
     switch (v) {
         case DateVerdict::Reject:
-            Serial.printf("[net] Date: giờ vô lý (%lu), bỏ qua\n", (unsigned long)dateUtc);
+            nlog("[net] Date: giờ vô lý (%lu), bỏ qua\n", (unsigned long)dateUtc);
             return;
         case DateVerdict::NoChange:
             return;
@@ -184,10 +184,10 @@ void applyServerDate(const char* date, uint32_t respMono) {
             break;
     }
     if (wasValid) {
-        Serial.printf("[net] Date: đồng hồ lệch %lld s ⇒ đã chỉnh utc=%lu%s\n",
+        nlog("[net] Date: đồng hồ lệch %lld s ⇒ đã chỉnh utc=%lu%s\n",
                       (long long)sys - (long long)utc, (unsigned long)utc, rtcNote(rw));
     } else {
-        Serial.printf("[net] Date: đã đặt đồng hồ utc=%lu (trước đó chưa hợp lệ)%s\n",
+        nlog("[net] Date: đã đặt đồng hồ utc=%lu (trước đó chưa hợp lệ)%s\n",
                       (unsigned long)utc, rtcNote(rw));
     }
 }
@@ -203,25 +203,25 @@ void markFetchFailed() {
 bool readBody(HTTPClient& http) {
     const int size = http.getSize();  // -1 khi không có Content-Length (body hết khi đóng kết nối)
     if (size >= (int)kScheduleBodyMax) {
-        Serial.printf("[net] body quá dài (%d byte)\n", size);
+        nlog("[net] body quá dài (%d byte)\n", size);
         return false;
     }
     const String te = http.header("Transfer-Encoding");
     if (te.length() > 0 && !te.equalsIgnoreCase("identity")) {
-        Serial.println("[net] body có Transfer-Encoding (không hỗ trợ với HTTP/1.0)");
+        nlogln("[net] body có Transfer-Encoding (không hỗ trợ với HTTP/1.0)");
         return false;
     }
     const size_t limit = size >= 0 ? (size_t)size : kScheduleBodyMax - 1;
     size_t len = 0;
     NetworkClient* stream = size == 0 ? nullptr : http.getStreamPtr();
     if (size != 0 && !stream) {
-        Serial.println("[net] lỗi đọc body: mất kết nối");
+        nlogln("[net] lỗi đọc body: mất kết nối");
         return false;
     }
     const uint32_t t0 = millis();
     while (len < limit) {
         if (millis() - t0 >= kHttpTimeoutMs) {
-            Serial.printf("[net] lỗi đọc body: timeout (%u byte)\n", (unsigned)len);
+            nlog("[net] lỗi đọc body: timeout (%u byte)\n", (unsigned)len);
             return false;
         }
         const int avail = stream->available();
@@ -240,11 +240,11 @@ bool readBody(HTTPClient& http) {
     }
     s_body[len] = '\0';
     if (size >= 0 && len < (size_t)size) {
-        Serial.printf("[net] lỗi đọc body: nhận %u/%d byte\n", (unsigned)len, size);
+        nlog("[net] lỗi đọc body: nhận %u/%d byte\n", (unsigned)len, size);
         return false;
     }
     if (size < 0 && len >= kScheduleBodyMax - 1) {
-        Serial.printf("[net] body quá dài (≥ %u byte)\n", (unsigned)len);
+        nlog("[net] body quá dài (≥ %u byte)\n", (unsigned)len);
         return false;
     }
     return true;
@@ -255,7 +255,7 @@ bool heartbeat() {
     const bool isHttps = strncmp(s_cfg.url, "https://", 8) == 0;
     const bool isHttp = strncmp(s_cfg.url, "http://", 7) == 0;
     if (!isHttps && !isHttp) {
-        Serial.println("[net] lỗi: Server URL không bắt đầu bằng https:// hoặc http:// — bỏ qua POST");
+        nlogln("[net] lỗi: Server URL không bắt đầu bằng https:// hoặc http:// — bỏ qua POST");
         markFetchFailed();
         return false;
     }
@@ -298,7 +298,7 @@ bool heartbeat() {
                        rtc};
     const size_t len = buildHeartbeat(s_json, sizeof s_json, info, s_events, n);
     if (len == 0) {
-        Serial.println("[net] lỗi: buildHeartbeat không đủ buffer");
+        nlogln("[net] lỗi: buildHeartbeat không đủ buffer");
         markFetchFailed();
         return false;
     }
@@ -306,7 +306,7 @@ bool heartbeat() {
     char auth[8 + sizeof s_cfg.token];
     snprintf(auth, sizeof auth, "Bearer %s", s_cfg.token);
 
-    Serial.printf("[net] POST %s (%u events, %u byte)\n", s_cfg.url, (unsigned)n, (unsigned)len);
+    nlog("[net] POST %s (%u events, %u byte)\n", s_cfg.url, (unsigned)n, (unsigned)len);
     HTTPClient http;
     http.useHTTP10(true);  // không chunked ⇒ đọc body thô từ stream được (readBody); kèm reuse=false
     http.setReuse(false);
@@ -314,7 +314,7 @@ bool heartbeat() {
     http.setTimeout(kHttpTimeoutMs);
     // http:// không mã hoá: token, lịch và header Date đều có thể bị đọc/sửa trên đường truyền.
     if (!http.begin(isHttps ? static_cast<WiFiClient&>(*s_tls) : *s_plain, s_cfg.url)) {
-        Serial.println("[net] lỗi: HTTPClient.begin thất bại (URL sai?)");
+        nlogln("[net] lỗi: HTTPClient.begin thất bại (URL sai?)");
         markFetchFailed();
         return false;
     }
@@ -327,9 +327,9 @@ bool heartbeat() {
 
     if (code != 200) {
         if (code < 0) {
-            Serial.printf("[net] POST lỗi: %s\n", HTTPClient::errorToString(code).c_str());
+            nlog("[net] POST lỗi: %s\n", HTTPClient::errorToString(code).c_str());
         } else {
-            Serial.printf("[net] POST status %d\n", code);
+            nlog("[net] POST status %d\n", code);
         }
         http.end();
         markFetchFailed();
@@ -376,15 +376,15 @@ bool heartbeat() {
                              (s_sched.l2 != Line2State::Missing && fetchDay != s_lastDay);
         strlcpy(s_lastBody, s_body, sizeof s_lastBody);
         s_lastDay = fetchDay;
-        Serial.printf("[net] 200: lịch %s (day %lu), queue còn %u\n",
+        nlog("[net] 200: lịch %s (day %lu), queue còn %u\n",
                       changed ? "MỚI" : "không đổi", (unsigned long)fetchDay, (unsigned)remaining);
-        Serial.printf("[net] lịch: %s\n", s_schedLog);
+        nlog("[net] lịch: %s\n", s_schedLog);
     } else if (parsed) {
-        Serial.printf("[net] 200: đồng hồ chưa dùng được, chưa áp lịch; queue còn %u\n",
+        nlog("[net] 200: đồng hồ chưa dùng được, chưa áp lịch; queue còn %u\n",
                       (unsigned)remaining);
-        Serial.printf("[net] lịch (chưa áp): %s\n", s_schedLog);
+        nlog("[net] lịch (chưa áp): %s\n", s_schedLog);
     } else {
-        Serial.printf("[net] 200: body lịch không hợp lệ, giữ cache; queue còn %u\n",
+        nlog("[net] 200: body lịch không hợp lệ, giữ cache; queue còn %u\n",
                       (unsigned)remaining);
     }
     return remaining > 0;
@@ -392,14 +392,14 @@ bool heartbeat() {
 
 void netTask(void*) {
     makeId();
-    Serial.printf("[net] task start, id=%s\n", s_id);
+    nlog("[net] task start, id=%s\n", s_id);
 
     s_tls = new WiFiClientSecure;
     s_tls->setCACert(kCaBundle);
     s_tls->setHandshakeTimeout(kHttpTimeoutMs / 1000);  // giây
     s_plain = new WiFiClient;
     if (strncmp(s_cfg.url, "http://", 7) == 0) {
-        Serial.println("[net] CẢNH BÁO: Server URL dùng http:// — không mã hoá, token và lịch đi dạng rõ."
+        nlogln("[net] CẢNH BÁO: Server URL dùng http:// — không mã hoá, token và lịch đi dạng rõ."
                        " Chỉ dùng để thử/demo.");
     }
 
@@ -434,7 +434,7 @@ void netTask(void*) {
             // Không heartbeat được ⇒ coi như fetch lỗi: phiên mới mang source failsafe. Báo ngay
             // khi vừa mất WiFi, rồi mỗi lần tới hạn heartbeat.
             if (wasConnected) {
-                Serial.println("[net] WiFi: mất kết nối");
+                nlogln("[net] WiFi: mất kết nối");
                 wasConnected = false;
                 markFetchFailed();
                 nextHb = now + kHeartbeatS;
@@ -451,7 +451,7 @@ void netTask(void*) {
 
         if (!wasConnected) {
             wasConnected = true;
-            Serial.printf("[net] WiFi: đã kết nối, IP %s, RSSI %d\n",
+            nlog("[net] WiFi: đã kết nối, IP %s, RSSI %d\n",
                           WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
             nextHb = now;  // heartbeat ngay khi có WiFi
         }
@@ -491,7 +491,7 @@ void netTask(void*) {
         if ((int32_t)(now - nextHb) >= 0) {
             const bool more = heartbeat();
             nextHb = monoSec() + (more ? kDrainS : kHeartbeatS);
-            Serial.printf("[net] heartbeat kế tiếp sau %lu s (stack trống %u byte)\n",
+            nlog("[net] heartbeat kế tiếp sau %lu s (stack trống %u byte)\n",
                           (unsigned long)(more ? kDrainS : kHeartbeatS),
                           (unsigned)uxTaskGetStackHighWaterMark(nullptr));
         }
@@ -526,7 +526,7 @@ void startNetTask(const NetConfig& cfg) {
     s_cfg.token[sizeof s_cfg.token - 1] = '\0';
     TaskHandle_t t = nullptr;
     if (xTaskCreate(netTask, "net", kTaskStack, nullptr, 1, &t) != pdPASS) {
-        Serial.println("[net] lỗi: không tạo được task mạng");
+        nlogln("[net] lỗi: không tạo được task mạng");
         return;
     }
     s_task = t;

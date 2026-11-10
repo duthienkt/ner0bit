@@ -1,5 +1,9 @@
 #include "shared.h"
 
+#include <stdio.h>
+
+#include <stdarg.h>
+
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <esp_system.h>
@@ -79,8 +83,45 @@ volatile bool g_clockValid = false;
 ModuleState g_ds3231 = ModuleState::Absent;
 ModuleState g_at24c32 = ModuleState::Absent;
 
+namespace {
+SemaphoreHandle_t s_logLock = nullptr;
+char s_logBuf[1280];  // đủ cho dòng log lịch dài nhất (kScheduleLogMax) + tiền tố
+
+void nlogv(const char* fmt, va_list ap) {
+    if (s_logLock) xSemaphoreTake(s_logLock, portMAX_DELAY);
+    int n;
+    if (g_clockValid) {
+        const time_t t = time(nullptr) + (time_t)kUtcOffset;
+        struct tm tm;
+        gmtime_r(&t, &tm);
+        n = snprintf(s_logBuf, sizeof s_logBuf, "%02d:%02d:%02d ", tm.tm_hour, tm.tm_min, tm.tm_sec);
+    } else {
+        n = snprintf(s_logBuf, sizeof s_logBuf, "+%lus ", (unsigned long)monoSec());
+    }
+    if (n < 0) n = 0;
+    const int m = vsnprintf(s_logBuf + n, sizeof s_logBuf - (size_t)n, fmt, ap);
+    size_t len = (size_t)n + (m > 0 ? (size_t)m : 0);
+    if (len >= sizeof s_logBuf) {  // cụt ⇒ vẫn kết thúc bằng xuống dòng
+        len = sizeof s_logBuf - 1;
+        s_logBuf[len - 1] = '\n';
+    }
+    Serial.write((const uint8_t*)s_logBuf, len);
+    if (s_logLock) xSemaphoreGive(s_logLock);
+}
+}  // namespace
+
+void nlog(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    nlogv(fmt, ap);
+    va_end(ap);
+}
+
+void nlogln(const char* line) { nlog("%s\n", line); }
+
 void sharedInit() {
     if (!g_lock) g_lock = xSemaphoreCreateMutex();
+    if (!s_logLock) s_logLock = xSemaphoreCreateMutex();
 }
 
 void clockBoot(uint32_t& utc) {
@@ -168,7 +209,7 @@ bool storageFailover() {
 uint32_t storageGeneration() { return s_generation; }
 
 void logStorageFailover() {
-    Serial.println("[storage] lỗi ghi AT24C32 ⇒ chuyển sang RAM tới lần khởi động sau: queue "
+    nlogln("[storage] lỗi ghi AT24C32 ⇒ chuyển sang RAM tới lần khởi động sau: queue "
                    "events mới (events chưa gửi trên AT24C32 bỏ), lastStop giữ, lịch cache ghi "
                    "NVS");
 }
@@ -231,7 +272,7 @@ bool persist(const TickResult& r) {
 
 void logEvent(const TickResult& r) {
     if (!r.hasEvent) return;
-    Serial.printf("[sched] event type=%u at=%lu source=%u reason=%u\n", (unsigned)r.event.type,
+    nlog("[sched] event type=%u at=%lu source=%u reason=%u\n", (unsigned)r.event.type,
                   (unsigned long)r.event.at, (unsigned)r.event.source, (unsigned)r.event.reason);
 }
 
@@ -267,13 +308,13 @@ void schedulerTick() {
     if (!clockOk) {
         if (!s_warned) {
             s_warned = true;
-            Serial.println("[sched] đồng hồ chưa hợp lệ — bơm tắt, bỏ tick (chờ NTP / server)");
+            nlogln("[sched] đồng hồ chưa hợp lệ — bơm tắt, bỏ tick (chờ NTP / server)");
         }
-        if (r.hasEvent) Serial.println("[sched] dừng phiên đang chạy do đồng hồ không dùng được");
+        if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy do đồng hồ không dùng được");
     } else {
         s_warned = false;
     }
-    if (r.pumpOn != wasOn) Serial.printf("[sched] bơm %s\n", r.pumpOn ? "BẬT" : "TẮT");
+    if (r.pumpOn != wasOn) nlog("[sched] bơm %s\n", r.pumpOn ? "BẬT" : "TẮT");
     logEvent(r);
 }
 
@@ -287,6 +328,6 @@ void stopPumpForRestart() {
         switched = persist(r);
     }
     if (switched) logStorageFailover();
-    if (r.hasEvent) Serial.println("[sched] dừng phiên đang chạy trước khi khởi động lại");
+    if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy trước khi khởi động lại");
     logEvent(r);
 }

@@ -34,9 +34,9 @@ void saveIfChanged(const char* body, uint32_t fetchDay, bool hasLine2) {
     if (switched) logStorageFailover();
     if (eeprom && !switched) {
         if (w == CacheWrite::Written) {
-            Serial.printf("[store] lịch cache ghi AT24C32 (day %lu)\n", (unsigned long)fetchDay);
+            nlog("[store] lịch cache ghi AT24C32 (day %lu)\n", (unsigned long)fetchDay);
         } else if (w == CacheWrite::Invalid) {
-            Serial.println("[store] lịch rỗng hoặc quá dài, không cache");
+            nlogln("[store] lịch rỗng hoặc quá dài, không cache");
         }
         // Lịch đã nằm trên AT24C32 ⇒ xoá bản NVS cũ (một lần mỗi lần boot), để nếu sau này
         // AT24C32 hỏng lúc boot thì không nạp lại lịch cũ từ NVS.

@@ -24,40 +24,40 @@ static void logModules(ModuleState ds, ModuleState at, bool clockValid, uint32_t
     switch (ds) {
         case ModuleState::Ok:
             if (clockValid) {
-                Serial.printf("[main] DS3231: ok — đồng hồ hệ thống lấy từ DS3231 (utc=%lu)\n",
+                nlog("[main] DS3231: ok — đồng hồ hệ thống lấy từ DS3231 (utc=%lu)\n",
                               (unsigned long)rtcUtc);
             } else {
-                Serial.printf("[main] DS3231: ok nhưng giờ vô lý (utc=%lu) — chờ NTP / server\n",
+                nlog("[main] DS3231: ok nhưng giờ vô lý (utc=%lu) — chờ NTP / server\n",
                               (unsigned long)rtcUtc);
             }
             break;
         case ModuleState::LostPower:
-            Serial.println("[main] DS3231: lost_power — cờ OSF bật (pin CR2032?), giờ không tin "
+            nlogln("[main] DS3231: lost_power — cờ OSF bật (pin CR2032?), giờ không tin "
                            "được — chờ NTP / server");
             break;
         case ModuleState::Failed:
-            Serial.println("[main] DS3231: failed — có ACK nhưng đọc lỗi, bỏ dùng — chờ NTP / "
+            nlogln("[main] DS3231: failed — có ACK nhưng đọc lỗi, bỏ dùng — chờ NTP / "
                            "server");
             break;
         case ModuleState::Absent:
-            Serial.println("[main] DS3231: absent — không có module, chờ NTP / server (chưa có giờ "
+            nlogln("[main] DS3231: absent — không có module, chờ NTP / server (chưa có giờ "
                            "thì không tưới)");
             break;
     }
     switch (at) {
         case ModuleState::Ok:
-            Serial.println("[main] AT24C32: ok");
+            nlogln("[main] AT24C32: ok");
             break;
         case ModuleState::Failed:
-            Serial.println("[main] AT24C32: failed — có ACK nhưng đọc/ghi header queue lỗi, bỏ "
+            nlogln("[main] AT24C32: failed — có ACK nhưng đọc/ghi header queue lỗi, bỏ "
                            "dùng");
             break;
         case ModuleState::LostPower:  // không dùng cho AT24C32
         case ModuleState::Absent:
-            Serial.println("[main] AT24C32: absent");
+            nlogln("[main] AT24C32: absent");
             break;
     }
-    Serial.println(at == ModuleState::Ok
+    nlogln(at == ModuleState::Ok
                        ? "[main] lưu trữ: AT24C32 (queue events, lastStop, lịch cache)"
                        : "[main] lưu trữ: RAM (queue events — mất khi reset; lastStop — giữ qua "
                          "reset mềm, mất khi mất điện) + NVS (lịch cache)");
@@ -73,7 +73,7 @@ void setup() {
 
     // 2. Cửa sổ 5 s: giữ BOOT ≥ 3 s ⇒ chế độ cấu hình.
     const bool button = portal::bootButtonHeld();
-    Serial.printf("[main] Ner0bit fw %s, nút BOOT: %s\n", kFwVersion, button ? "giữ ⇒ setup" : "không");
+    nlog("[main] Ner0bit fw %s, nút BOOT: %s\n", kFwVersion, button ? "giữ ⇒ setup" : "không");
 
     // 3. I2C, module DS3231 / AT24C32 (đều tuỳ chọn), đồng hồ hệ thống, storage.
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
@@ -97,12 +97,12 @@ void setup() {
     if (ls.switched) logStorageFailover();
     logModules(ds, at, clockValid, rtcUtc);
     if (ls.retainedValid) {
-        Serial.printf("[main] queue %u events, lastStop %lu (storage %lu, bản sao giữ qua reset "
+        nlog("[main] queue %u events, lastStop %lu (storage %lu, bản sao giữ qua reset "
                       "%lu)\n",
                       (unsigned)queued, (unsigned long)ls.seed, (unsigned long)ls.stored,
                       (unsigned long)ls.retained);
     } else {
-        Serial.printf("[main] queue %u events, lastStop %lu (bản sao giữ qua reset: không có)\n",
+        nlog("[main] queue %u events, lastStop %lu (bản sao giữ qua reset: không có)\n",
                       (unsigned)queued, (unsigned long)ls.seed);
     }
 
@@ -114,18 +114,18 @@ void setup() {
         SharedLock lock;
         g_sched.setSchedule(s_schedule, fetchDay);
     }
-    Serial.printf("[main] lịch cache: %s\n",
+    nlog("[main] lịch cache: %s\n",
                   cacheOk ? "đã nạp" : (hasCache ? "lỗi, bỏ qua" : "chưa có"));
     if (cacheOk) {
         static char line[kScheduleLogMax];  // static: không chiếm stack loop task
         formatSchedule(s_schedule, line, sizeof line);
-        Serial.printf("[main] lịch: %s (nhận ngày %lu)\n", line, (unsigned long)fetchDay);
+        nlog("[main] lịch: %s (nhận ngày %lu)\n", line, (unsigned long)fetchDay);
     }
 
     // 5. Chế độ cấu hình hoặc chạy thường.
     const bool hasCfg = config::load(s_cfg);
     if (!hasCfg || button) {
-        Serial.println(hasCfg ? "[main] vào chế độ cấu hình (nút BOOT)"
+        nlogln(hasCfg ? "[main] vào chế độ cấu hình (nút BOOT)"
                               : "[main] chưa có cấu hình ⇒ chế độ cấu hình");
         portal::run(hasCfg ? &s_cfg : nullptr);  // không return
     }
