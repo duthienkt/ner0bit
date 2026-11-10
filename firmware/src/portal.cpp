@@ -86,7 +86,7 @@ void sendForm(int code, const char* error, const String& ssid, const String& url
            "placeholder=\"https://...\" value=\"");
     appendEscaped(b, url);
     b += F("\"><label for=\"token\">Token</label>"
-           "<input id=\"token\" name=\"token\" type=\"password\" maxlength=\"64\"");
+           "<input id=\"token\" name=\"token\" maxlength=\"64\"");
     b += hasOld ? F(" placeholder=\"để trống = giữ token cũ\"") : F(" required");
     b += F("><button type=\"submit\">Lưu &amp; khởi động lại</button></form>"
            "<p class=\"hint\">Server URL: https:// (khuyến nghị) hoặc http://. "
