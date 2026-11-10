@@ -1,4 +1,4 @@
-// TẠM (Task 5): chỉ dùng tối thiểu các driver để chúng được biên dịch + link.
+// TẠM (Task 5/6): chỉ dùng tối thiểu các driver + network task để chúng được biên dịch + link.
 // Task 7 viết lại toàn bộ file này.
 #include <Arduino.h>
 #include <Wire.h>
@@ -6,15 +6,19 @@
 #include "at24c32.h"
 #include "config_store.h"
 #include "ds3231.h"
+#include "net_task.h"
 #include "pins.h"
 #include "pump.h"
+#include "shared.h"
 
 static At24c32 g_eeprom;
 
 void setup() {
     pump::begin();
     Serial.begin(115200);
+    sharedInit();
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
+    g_queue.begin();
 
     const bool rtcOk = ds3231::begin();
     const bool clockValid = rtcOk && !ds3231::lostPower();
@@ -32,6 +36,9 @@ void setup() {
 
     Serial.printf("rtc=%d valid=%d utc=%lu eeprom=%d cfg=%d sched=%d\n", rtcOk, clockValid,
                   (unsigned long)utc, eepromOk, hasCfg, hasSched);
+
+    g_clockValid = clockValid;
+    if (hasCfg) startNetTask(cfg);
 
     if (false) {  // giữ symbol cho link-check, không chạy
         ds3231::writeUtc(utc);
