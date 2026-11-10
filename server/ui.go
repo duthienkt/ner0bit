@@ -155,6 +155,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Error: fmt.Sprintf("Sai quá nhiều lần. Thử lại sau %d phút.", mins)})
 		return
 	}
+	// Mỗi khoá (IP, IPv6 /64) chỉ được xét một lần thử tại một thời điểm: gửi dồn song song không né
+	// được giới hạn 5 lần sai trước khi lần sai kịp được ghi.
+	if !s.reserveAttempt(ip) {
+		log.Printf("UI: 429 cho %s (đang có lần thử khác cùng nguồn)", ip)
+		s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
+			Error: "Đang xử lý lần đăng nhập trước. Thử lại sau ít giây."})
+		return
+	}
+	defer s.releaseAttempt(ip)
+	if s.loginAttemptHook != nil {
+		s.loginAttemptHook()
+	}
 	if s.cannotRecord(ip) {
 		// Map đầy toàn mục bị khoá (đang bị dò hàng loạt) và nguồn này chưa được ghi nhận: phải giành
 		// lượt toàn cục TRƯỚC khi kiểm tra mật khẩu — tối đa ~1 lần thử/giây cho cả server, và 429
@@ -215,6 +227,25 @@ func (s *Server) passwordMatches(pw string) bool {
 	a := sha256.Sum256([]byte(pw))
 	b := sha256.Sum256([]byte(s.UIPassword))
 	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
+}
+
+func (s *Server) reserveAttempt(key string) bool {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	if s.loginBusy[key] {
+		return false
+	}
+	if s.loginBusy == nil {
+		s.loginBusy = make(map[string]bool)
+	}
+	s.loginBusy[key] = true
+	return true
+}
+
+func (s *Server) releaseAttempt(key string) {
+	s.loginMu.Lock()
+	delete(s.loginBusy, key)
+	s.loginMu.Unlock()
 }
 
 // loginBlocked dọn các mục quá hạn rồi cho biết IP có đang bị khoá không (và tới khi nào).
