@@ -1,6 +1,8 @@
 #include "shared.h"
 
 #include <Arduino.h>
+#include <esp_attr.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <sys/time.h>
 #include <time.h>
@@ -10,6 +12,7 @@
 #include "net_task.h"
 #include "pump.h"
 #include "ram_storage.h"
+#include "retained_stop.h"
 #include "time_trust.h"
 
 namespace {
@@ -54,6 +57,16 @@ private:
 
 SwitchStorage s_store;
 uint32_t s_generation = 0;
+
+// Bản sao lastStop giữ qua reset mềm / WDT / panic / brownout (không được khởi tạo lúc boot).
+// Cập nhật cùng lúc với lastStop trong queue, ở cả hai chế độ storage. Xem retained_stop.h.
+RTC_NOINIT_ATTR RetainedStop s_retainedStop;
+
+// Ghi lastStop xuống queue (AT24C32 / RAM) và bản sao giữ qua reset. Gọi trong lock.
+void writeLastStop(uint32_t v) {
+    g_queue.setLastStop(v);
+    retainedStopWrite(s_retainedStop, v);
+}
 
 bool ds3231Usable() { return g_ds3231 == ModuleState::Ok || g_ds3231 == ModuleState::LostPower; }
 
@@ -119,6 +132,22 @@ void storageBoot() {
     }
     s_store.select(false);
     g_queue.begin();  // RAM toàn 0 ⇒ format: queue rỗng, lastStop = 0
+}
+
+LastStopBoot lastStopBoot() {
+    LastStopBoot b;
+    const bool powerOn = esp_reset_reason() == ESP_RST_POWERON;
+    b.stored = g_queue.lastStop();
+    b.retainedValid = retainedStopValid(s_retainedStop, powerOn);
+    b.retained = b.retainedValid ? s_retainedStop.lastStop : 0;
+    b.seed = retainedStopSeed(b.stored, s_retainedStop, powerOn);
+    // Chép giá trị mới hơn vào cả hai nơi: queue (AT24C32: một lần ghi, chỉ khi bản sao mới hơn)
+    // và bản sao (cấp điện lại ⇒ ghi đè rác bằng giá trị storage).
+    if (b.seed != b.stored) g_queue.setLastStop(b.seed);
+    retainedStopWrite(s_retainedStop, b.seed);
+    b.switched = storageFailover();
+    g_sched.setLastStop(b.seed);
+    return b;
 }
 
 bool storageOnEeprom() { return s_store.onEeprom(); }
@@ -192,7 +221,7 @@ namespace {
 // sang RAM (caller log ngoài lock).
 bool persist(const TickResult& r) {
     if (r.hasEvent) g_queue.push(r.event);
-    if (r.lastStopChanged) g_queue.setLastStop(r.lastStop);
+    if (r.lastStopChanged) writeLastStop(r.lastStop);
     if (!storageFailover()) return false;
     // Ghi lỗi giữa chừng: event vừa rồi có thể không nằm trọn trong queue AT24C32 (đã bỏ) ⇒
     // ghi lại vào queue RAM mới. lastStop đã được storageFailover chép sang.

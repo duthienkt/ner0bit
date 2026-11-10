@@ -23,4 +23,6 @@ bool loadSchedule(char* body, size_t cap, uint32_t& fetchDay);
 // khi hasLine2 (lịch có dòng 2, kể cả dòng rỗng): fetchDay chỉ dùng để xét dòng 2 còn hạn, nên
 // lịch một dòng không ghi flash mỗi ngày.
 void saveScheduleIfChanged(const char* body, uint32_t fetchDay, bool hasLine2);
+// Xoá khoá sched và fday (chỉ khoá nào đang có — không có thì không ghi flash).
+void clearSchedule();
 }  // namespace config

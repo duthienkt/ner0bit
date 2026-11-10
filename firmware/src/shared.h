@@ -39,6 +39,18 @@ void clockBoot(uint32_t& utc);
 // trong RamStorage, lịch cache trong NVS). Đặt g_at24c32.
 void storageBoot();
 
+struct LastStopBoot {
+    uint32_t stored;     // lastStop đọc từ queue (AT24C32; chế độ RAM: 0)
+    bool retainedValid;  // bản sao giữ qua reset hợp lệ (không phải cấp điện lại, check khớp)
+    uint32_t retained;   // giá trị bản sao (0 nếu không hợp lệ)
+    uint32_t seed;       // giá trị mới hơn ⇒ nạp cho g_sched
+    bool switched;       // ghi AT24C32 lỗi ⇒ vừa chuyển sang RAM (caller log ngoài lock)
+};
+// Lúc boot, sau storageBoot(), trong lock. lastStop = giá trị mới hơn giữa queue và bản sao
+// RTC_NOINIT (giữ qua reset mềm, WDT, panic, brownout; bỏ khi esp_reset_reason() là POWERON —
+// lần tắt do mất điện được miễn quy tắc nghỉ). Nạp vào g_sched, chép lại vào queue và bản sao.
+LastStopBoot lastStopBoot();
+
 // true: queue, lastStop, lịch cache trên AT24C32. false: RAM + NVS. Gọi trong lock.
 bool storageOnEeprom();
 // IStorage của chế độ hiện tại (ghi AT24C32 có thử lại; lỗi được ghi nhận cho storageFailover).

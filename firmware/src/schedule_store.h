@@ -3,7 +3,8 @@
 #include <stdint.h>
 
 // Lịch cache (body 200 gần nhất + ngày nhận) theo chế độ storage hiện tại:
-// - AT24C32: vùng 0x0800 có CRC (lib/core/schedule_cache.h); NVS không bị ghi.
+// - AT24C32: vùng 0x0800 có CRC (lib/core/schedule_cache.h); NVS không ghi lịch — lần lưu
+//   AT24C32 thành công đầu tiên mỗi lần boot xoá khoá sched/fday cũ trong NVS (nếu có).
 // - RAM (không có / mất AT24C32): NVS (config_store), fday chỉ ghi khi lịch có dòng 2.
 // Tự lấy g_lock khi cần bus I2C; không gọi khi đang giữ g_lock.
 namespace schedule_store {

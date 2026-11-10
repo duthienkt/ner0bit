@@ -96,4 +96,16 @@ void saveScheduleIfChanged(const char* body, uint32_t fetchDay, bool hasLine2) {
     p.end();
 }
 
+void clearSchedule() {
+    Preferences p;
+    if (!p.begin(kNs, true)) return;  // namespace chưa có ⇒ không có gì để xoá
+    const bool has = p.isKey(kSched) || p.isKey(kFetchDay);
+    p.end();
+    if (!has || !p.begin(kNs, false)) return;
+    // Xoá body trước: mất điện giữa chừng ⇒ loadSchedule thấy không có cache.
+    if (p.isKey(kSched)) p.remove(kSched);
+    if (p.isKey(kFetchDay)) p.remove(kFetchDay);
+    p.end();
+}
+
 }  // namespace config

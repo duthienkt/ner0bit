@@ -38,6 +38,13 @@ void saveIfChanged(const char* body, uint32_t fetchDay, bool hasLine2) {
         } else if (w == CacheWrite::Invalid) {
             Serial.println("[store] lịch rỗng hoặc quá dài, không cache");
         }
+        // Lịch đã nằm trên AT24C32 ⇒ xoá bản NVS cũ (một lần mỗi lần boot), để nếu sau này
+        // AT24C32 hỏng lúc boot thì không nạp lại lịch cũ từ NVS.
+        static bool s_nvsCleared = false;
+        if (!s_nvsCleared && (w == CacheWrite::Written || w == CacheWrite::Unchanged)) {
+            s_nvsCleared = true;
+            config::clearSchedule();  // NVS, không cần g_lock
+        }
         return;
     }
     config::saveScheduleIfChanged(body, fetchDay, hasLine2);  // NVS, không cần g_lock

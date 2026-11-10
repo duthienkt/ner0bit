@@ -58,8 +58,8 @@ static void logModules(ModuleState ds, ModuleState at, bool clockValid, uint32_t
     }
     Serial.println(at == ModuleState::Ok
                        ? "[main] lưu trữ: AT24C32 (queue events, lastStop, lịch cache)"
-                       : "[main] lưu trữ: RAM (queue events, lastStop — mất khi reset) + NVS (lịch "
-                         "cache)");
+                       : "[main] lưu trữ: RAM (queue events — mất khi reset; lastStop — giữ qua "
+                         "reset mềm, mất khi mất điện) + NVS (lịch cache)");
 }
 
 void setup() {
@@ -81,22 +81,29 @@ void setup() {
     ModuleState at;
     bool clockValid;
     uint16_t queued;
-    uint32_t lastStop;
+    LastStopBoot ls;
     {
         SharedLock lock;
         clockBoot(rtcUtc);
         storageBoot();
-        g_sched.setLastStop(g_queue.lastStop());
+        ls = lastStopBoot();
         g_sched.setFetchOk(false);
         ds = g_ds3231;
         at = g_at24c32;
         clockValid = g_clockValid;
         queued = g_queue.count();
-        lastStop = g_queue.lastStop();
     }
+    if (ls.switched) logStorageFailover();
     logModules(ds, at, clockValid, rtcUtc);
-    Serial.printf("[main] queue %u events, lastStop %lu\n", (unsigned)queued,
-                  (unsigned long)lastStop);
+    if (ls.retainedValid) {
+        Serial.printf("[main] queue %u events, lastStop %lu (storage %lu, bản sao giữ qua reset "
+                      "%lu)\n",
+                      (unsigned)queued, (unsigned long)ls.seed, (unsigned long)ls.stored,
+                      (unsigned long)ls.retained);
+    } else {
+        Serial.printf("[main] queue %u events, lastStop %lu (bản sao giữ qua reset: không có)\n",
+                      (unsigned)queued, (unsigned long)ls.seed);
+    }
 
     // 4. Lịch cache (AT24C32 hoặc NVS theo chế độ storage).
     uint32_t fetchDay = 0;

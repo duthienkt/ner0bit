@@ -48,7 +48,7 @@ Lúc boot firmware dò từng chip qua I2C (DS3231 `0x68`, AT24C32 `0x57`), đ�
 | DS3231 | `failed` — có ACK nhưng đọc lỗi (đã thử 3 lần) | Bỏ dùng tới lần boot sau; như không có module. |
 | DS3231 | `absent` — không có ACK | Chờ NTP / `Date`; chưa có giờ ⇒ không tưới. |
 | AT24C32 | `ok` — có ACK, đọc (hoặc format) được header queue | Queue events, lastStop, lịch cache trên AT24C32 — giữ qua mất điện. |
-| AT24C32 | `failed` (có ACK nhưng đọc/ghi header lỗi) / `absent` | Queue events + lastStop trong **RAM 4 KB** (mất khi reset), lịch cache trong NVS. |
+| AT24C32 | `failed` (có ACK nhưng đọc/ghi header lỗi) / `absent` | Queue events + lastStop trong **RAM 4 KB** (mất khi reset; lastStop có bản sao giữ qua reset mềm — xem "Scheduler & an toàn bơm"), lịch cache trong NVS. |
 
 Lỗi lúc chạy **không bao giờ dừng việc tưới**:
 
@@ -200,7 +200,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại �
 - **Hard-cap 30 phút/phiên** — duration lớn hơn bị cắt còn 30 phút (bơm rửa xe không nên chạy liên tục lâu hơn); phiên bị cắt kết thúc bằng `stop` reason `capped`.
 - **Nghỉ tối thiểu 10 phút** giữa hai lần bật bơm (chống bật/tắt dồn dập — kẻ thù chính của tuổi thọ bơm).
   - Mốc tới giờ mà chưa nghỉ đủ 10 phút ⇒ **bỏ mốc** (không hoãn), ghi event `skipped` reason `rest`.
-  - Thời điểm tắt bơm gần nhất (lastStop) lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot. Chế độ RAM (không có AT24C32): lastStop mất khi reset ⇒ sau reboot quy tắc nghỉ chỉ tính từ lần tắt trong lần chạy mới.
+  - Thời điểm tắt bơm gần nhất (lastStop) lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot. Ở cả hai chế độ, lastStop còn có bản sao trong RAM `RTC_NOINIT` (magic + check) giữ qua reset mềm, WDT, panic, brownout; lúc boot nạp giá trị mới hơn giữa AT24C32 và bản sao, bản sao bị bỏ khi khởi động do cấp điện lại (`ESP_RST_POWERON`) ⇒ chế độ RAM (không có AT24C32) chỉ mất lastStop khi mất điện, và lần tắt do mất điện được miễn quy tắc nghỉ.
 - **Phiên đang chạy luôn chạy nốt** theo duration lúc bắt đầu, kể cả khi lịch mới về giữa chừng hoặc qua 0h00.
 - Mốc tới giờ khi bơm đang chạy phiên khác ⇒ **bỏ mốc** (phiên đang chạy không kéo dài), ghi event `skipped` reason `busy`.
 - **Đồng hồ không dùng được** (chưa hợp lệ, hoặc giờ hệ thống vô lý) ⇒ bơm tắt, phiên đang chạy kết thúc hẳn bằng `stop` reason `abort` (không bật lại giữa chừng khi đồng hồ có lại), bỏ tick. Trước mỗi lần chủ động khởi động lại (vd. thoát chế độ cấu hình) cũng kết thúc phiên đang chạy như vậy.
@@ -241,7 +241,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại �
 | DS3231 `ok` (pin còn) | Lấy từ DS3231 | Tưới tiếp theo lịch cache (kể cả tưới bù). |
 | Không có module, hoặc DS3231 `lost_power` / `failed` | Chưa có giờ | **Không tưới cho tới khi có mạng lại** (NTP hoặc `Date` đặt giờ). Bơm luôn tắt khi chưa có giờ. |
 
-- Không có AT24C32: queue events (chưa gửi) và lastStop nằm trong RAM ⇒ mất khi mất điện / reset.
+- Không có AT24C32: queue events (chưa gửi) và lastStop nằm trong RAM ⇒ mất khi mất điện / reset (lastStop giữ qua reset mềm nhờ bản sao `RTC_NOINIT`, chỉ mất khi mất điện).
 
 ## Lưu trữ
 
@@ -250,8 +250,8 @@ Cấu hình (WiFi, Server URL, Token) **luôn ở NVS**, không bao giờ chép 
 | Dữ liệu | Có AT24C32 (`at24c32: "ok"`) | Không có / hỏng AT24C32 |
 |---|---|---|
 | WiFi SSID/password, Server URL, Token | NVS | NVS |
-| Queue events (ring buffer 200 × 10 B ≈ 2 KB) + lastStop | AT24C32 — giữ qua mất điện | RAM 4 KB (`RamStorage`, cùng layout và cùng code `EventQueue`) — mất khi reset |
-| Lịch cache | AT24C32 `0x0800` — ghi khi body hoặc ngày fetch đổi; **không ghi NVS** | NVS — body ghi khi đổi; khoá `fday` (ngày fetch) **chỉ ghi khi body có dòng 2** (rỗng hoặc có mốc), nên không ghi flash mỗi ngày |
+| Queue events (ring buffer 200 × 10 B ≈ 2 KB) + lastStop | AT24C32 — giữ qua mất điện | RAM 4 KB (`RamStorage`, cùng layout và cùng code `EventQueue`) — mất khi reset (lastStop: bản sao `RTC_NOINIT` giữ qua reset mềm) |
+| Lịch cache | AT24C32 `0x0800` — ghi khi body hoặc ngày fetch đổi; **không ghi NVS** (lần lưu AT24C32 thành công đầu tiên mỗi lần boot xoá khoá `sched` / `fday` cũ trong NVS nếu có) | NVS — body ghi khi đổi; khoá `fday` (ngày fetch) **chỉ ghi khi body có dòng 2** (rỗng hoặc có mốc), nên không ghi flash mỗi ngày |
 
 - AT24C32: EEPROM 4 KB, ~1 triệu lần ghi — hợp cho dữ liệu ghi thường xuyên, không làm mòn flash ESP.
 - AT24C32 hỏng lúc chạy ⇒ chuyển sang cột phải tới lần boot sau (queue RAM mới rỗng, lastStop giữ).
