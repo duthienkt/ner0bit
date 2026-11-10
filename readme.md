@@ -30,7 +30,7 @@ ner0bit/
 ├── firmware/          # Firmware ESP32-C3 chính — project PlatformIO
 ├── playground/        # Code thử nghiệm
 │   └── blink/         # Blink LED onboard GPIO 8 (bài kiểm tra toolchain đầu tiên)
-├── php-server/        # Server PHP: heartbeat + sinh lịch (viết sau, theo interface trong docs)
+├── server/            # Server Go: nhận heartbeat, trả lịch tưới (Docker)
 ├── web-client/        # Web UI xem trạng thái + sửa lịch (viết sau)
 ├── enclosure-design/  # Hộp đựng (Blender)
 ├── docs/              # Tài liệu, thiết kế
@@ -52,6 +52,30 @@ pio device monitor   # xem Serial log (Ctrl+C để thoát)
 
 Gán chân tạm nằm trong `firmware/src/pins.h` (bảng trong [docs/system-design.md](docs/system-design.md), mục Phần cứng & điện).
 
+## Server (Go)
+
+Nhận heartbeat của thiết bị, ghi log, trả lịch tưới. Lịch sửa tay trong `server/data/schedule.json` — server đọc lại mỗi request, không cần restart.
+
+```bash
+cd server
+cp .env.example .env                                  # điền NER0BIT_TOKEN (+ NER0BIT_DEVICE_ID)
+cp data/schedule.example.json data/schedule.json      # sửa lịch
+docker compose up -d --build                          # lắng nghe :8080 (HTTP)
+go test ./...                                         # test (cần Go 1.24+)
+```
+
+`schedule.json`:
+
+```json
+{"daily": "25200:900,61200", "days": {"2026-11-12": "", "2026-11-13": "28800"}}
+```
+
+- `daily`: dòng 1, lặp mỗi ngày (`<giây từ 0h>[:<giây tưới>]`, mặc định 300 giây).
+- `days`: lịch riêng theo ngày (giờ VN) — `""` = hôm đó không tưới, có mốc = thay `daily` trong ngày.
+- File sai ⇒ server trả 503, thiết bị giữ lịch cũ; lỗi ghi trong log container.
+
+Log: `data/heartbeats.jsonl`, `data/events.jsonl` (mỗi dòng một JSON). Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
+
 ## Chạy code thử nghiệm
 
 Yêu cầu: [PlatformIO](https://platformio.org/) (extension VSCode hoặc CLI `pio`).
@@ -69,5 +93,5 @@ Cổng nạp cấu hình cho macOS (`/dev/cu.usbmodem*` trong `platformio.ini`).
 
 ## Trạng thái triển khai
 
-Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32, heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server PHP, web-client viết sau.
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32, heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản; module thời tiết, web-client viết sau.
 

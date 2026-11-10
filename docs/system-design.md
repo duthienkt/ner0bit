@@ -11,9 +11,9 @@ Cập nhật 2026-11-10 (firmware): TLS dùng `setCACert()` với PEM nối 7 ro
 Hệ thống 2 phần:
 
 - **Thiết bị**: ESP32-C3 điều khiển bơm tưới cây theo lịch, hoạt động độc lập với mạng (RTC + lịch cache).
-- **Server** (PHP, viết sau): nhận heartbeat, trả lịch tưới. Module thời tiết chỉnh lịch theo thời tiết (viết sau).
+- **Server** (Go, `server/`): nhận heartbeat, trả lịch tưới. Module thời tiết chỉnh lịch theo thời tiết (viết sau).
 
-Giao tiếp một chiều duy nhất do ESP chủ động: **mỗi 5 phút POST một heartbeat, response mang lịch mới**. Không cần static IP, không MQTT, không websocket — chạy được trên shared hosting PHP.
+Giao tiếp một chiều duy nhất do ESP chủ động: **mỗi 5 phút POST một heartbeat, response mang lịch mới**. Không cần static IP, không MQTT, không websocket — server là một binary Go nhỏ (Docker), public qua Cloudflare Tunnel hoặc reverse proxy.
 
 ## Phần cứng & điện
 
@@ -122,7 +122,7 @@ Authorization: Bearer <Token>
   - Body **có** ký tự `\n` đầu tiên ⇒ có dòng 2 = phần giữa `\n` thứ nhất và `\n` thứ hai (hoặc hết body). `"25200\n"` ⇒ dòng 2 **rỗng** ⇒ hôm nay không tưới.
   - Body **không có** `\n` nào ⇒ thiếu dòng 2. `"25200"` ⇒ dùng dòng 1.
   - Dòng 2 có nội dung nhưng **không có mốc hợp lệ nào** (vd. `abc`) ⇒ coi như **thiếu** (dùng dòng 1) — an toàn cho cây hơn là bỏ tưới.
-  - PHP luôn in đủ 2 dòng, kể cả dòng 2 rỗng: `echo "$line1\n$line2";`.
+  - Server: ngày có lịch riêng thì in `dòng1 + "\n" + dòng2` (kể cả dòng 2 rỗng); không có lịch riêng thì chỉ in dòng 1, không `\n`.
 - Mọi mốc tính theo **giờ Việt Nam (UTC+7)**; server chịu trách nhiệm sinh dòng 2 đúng ngày VN.
 - Qua 0h00, ESP bỏ dòng 2 cũ (không còn "hôm nay"), dùng dòng 1 cho tới lần fetch thành công kế tiếp.
 
@@ -134,7 +134,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 - Format canonical không chứa khoảng trắng (`25200:900,61200`); parser chấp nhận CRLF và khoảng trắng thừa quanh số.
 - Mỗi dòng tối đa **20 mốc**, nhận theo thứ tự xuất hiện, phần dư bỏ.
 - Entry sai bị **bỏ lẻ**, không văng cả file: token không phải số, giây ≥ 86400, hoặc duration = 0.
-- Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (PHP không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
+- Cả hai dòng đều không có mốc hợp lệ nào ⇒ coi như fetch lỗi, giữ cache. (Server không sinh trạng thái này — "hôm nay không tưới" là dòng 1 có mốc + dòng 2 rỗng.)
 - Request gửi bằng **HTTP/1.0** (`Connection: close`) nên response không chunked; ESP đọc body thẳng vào buffer cố định, body lịch tối đa **1023 byte** (dài hơn ⇒ coi như lịch lỗi, giữ cache).
 - HTTPS qua `WiFiClientSecure` (TLS). Timeout 10 giây **cho từng pha** (kết nối TCP, bắt tay TLS, đọc response) — một request xấu nhất có thể kéo dài vài chục giây, nhưng không bao giờ chặn scheduler bơm (1 giây/lần) vì network chạy trong FreeRTOS task riêng.
 
@@ -146,7 +146,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
   - GTS Root R1, GTS Root R3, GTS Root R4 (Google Trust Services)
   - SSL.com Root Certification Authority RSA, SSL.com Root Certification Authority ECC
 - Lý do: Cloudflare tự xoay nhà cấp chứng chỉ (Let's Encrypt, Google Trust Services, SSL.com…) — pin một root thì tới lúc đổi CA thiết bị mất kết nối âm thầm. Danh sách 7 root dùng được cho cả hai phương án, chỉ tốn ~10 KB flash (nhẹ hơn nhúng cả CA bundle Mozilla qua `setCACertBundle()`). Cập nhật danh sách: nối lại các file PEM như ghi chú đầu `ca_bundle.cpp` rồi build lại.
-- `http://` được chấp nhận **chỉ để thử/demo** (vd. server PHP chạy trong LAN): dùng `WiFiClient` thường, không mã hoá. Token, lịch tưới và header `Date` đi dạng rõ — ai cùng mạng cũng đọc được token, sửa được lịch và giờ. Portal và Serial log đều cảnh báo. Triển khai thật luôn dùng `https://`.
+- `http://` được chấp nhận **chỉ để thử/demo** (vd. server chạy trong LAN): dùng `WiFiClient` thường, không mã hoá. Token, lịch tưới và header `Date` đi dạng rõ — ai cùng mạng cũng đọc được token, sửa được lịch và giờ. Portal và Serial log đều cảnh báo. Triển khai thật luôn dùng `https://`.
 
 ## Scheduler & an toàn bơm
 
@@ -172,7 +172,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
   3. **Chưa có neo** (vừa boot, hoặc server không tới được, hoặc neo đã quá 24 giờ) ⇒ chỉ nhận NTP khi đồng hồ chưa hợp lệ (bootstrap — chưa có giờ nào tốt hơn) hoặc |NTP − DS3231| ≤ **5 s**. NTP lệch lớn **không bao giờ** ghi đè một DS3231 đang hợp lệ: ESP bỏ giờ NTP đó, heartbeat ngay, và chờ header `Date` phân xử (DS3231 sai thật thì quy tắc 1 chỉnh lại).
   4. Giờ NTP hoặc `Date` < 2026-01-01 hoặc ≥ **2100-01-01** (4102444800) ⇒ vô lý, bỏ (`Date` vô lý không đổi neo).
 - Server **phải gửi header `Date` đúng giờ** — DS3231 được chỉnh theo nó mỗi khi lệch quá 5 s. Web server và Cloudflare đều tự gửi header này theo chuẩn; server chỉ cần đồng bộ giờ hệ thống (NTP phía server).
-- Header `Date` phải theo dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — PHP/nginx/Apache/Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
+- Header `Date` phải theo dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — Go `net/http`, nginx, Apache, Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
 - Giờ hệ thống của ESP (`time()`) vẫn do SNTP đặt, nhưng không dùng cho scheduler (chỉ DS3231) và không ảnh hưởng TLS: mbedTLS của Arduino-ESP32 build không bật `MBEDTLS_HAVE_TIME_DATE` nên không kiểm hạn chứng chỉ.
 
 ## Failsafe
@@ -189,7 +189,7 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 
 ## Phần để sau (không thuộc bản này)
 
-- **Module PHP**: endpoint heartbeat + sinh lịch (theo interface trên) + lưu log events. Chỉ phục vụ 1 thiết bị: một lịch duy nhất, kiểm tra token + `id`.
+- ~~Module PHP~~ → đã thay bằng **server Go** (`server/`): heartbeat + trả lịch từ `data/schedule.json` + log `heartbeats.jsonl`/`events.jsonl`. Chỉ 1 thiết bị, kiểm tra token + `id`.
 - **Module thời tiết**: chỉnh dòng 2 theo dự báo.
 - **Web-client**: xem trạng thái thiết bị, sửa lịch.
 - **Enclosure**: đã có file `.blend` ban đầu.
