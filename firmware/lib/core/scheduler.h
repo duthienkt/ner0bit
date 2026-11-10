@@ -29,6 +29,12 @@ private:
     bool fetchOk_ = false;
     uint32_t lastStop_ = 0;
     uint32_t handledUpTo_ = 0;
+    bool haveRunStop_ = false;  // đã có lần tắt trong lần chạy này (RAM)
+    uint32_t monoLastStop_ = 0;
+
+    // Chọn dòng áp dụng cho ngày `day`; nullptr nếu ngày đó không có mốc nào.
+    const Line* lineForDay(uint32_t day, Source& src) const;
+    bool restViolated(uint32_t now, uint32_t mono) const;
 
     bool running_ = false;
     uint32_t startActual_ = 0;

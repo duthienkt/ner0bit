@@ -204,6 +204,72 @@ void test_no_schedule_does_nothing() {
     TEST_ASSERT_FALSE(r.lastStopChanged);
 }
 
+void test_rest_survives_backward_clock_jump() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300,25380:1800"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 5, 0), 300);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    TEST_ASSERT_TRUE(r.lastStopChanged);
+    r = s.tick(T(D, 7, 3, 1), 301);  // NTP chỉnh lùi
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 3, 0), 0, Source::Normal, kSkippedRest);
+}
+
+void test_persisted_future_lastStop_blocks() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300"), D);
+    s.setFetchOk(true);
+    s.setLastStop(T(D, 7, 0, 30));
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), 0, Source::Normal, kSkippedRest);
+}
+
+void test_rest_boundary_599_600() {
+    Scheduler s;
+    s.setSchedule(sch("25200:300"), D);
+    s.setFetchOk(true);
+    s.setLastStop(T(D, 6, 50, 1));  // 599s
+    TickResult r = s.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 0, 0), 0, Source::Normal, kSkippedRest);
+    Scheduler s2;
+    s2.setSchedule(sch("25200:300"), D);
+    s2.setFetchOk(true);
+    s2.setLastStop(T(D, 6, 50, 0));  // 600s
+    r = s2.tick(T(D, 7, 0, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+}
+
+void test_resume_across_midnight() {
+    Scheduler s;
+    s.setSchedule(sch("86100:600"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D + 1, 0, 2, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D + 1, 0, 4, 59), 179);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D + 1, 0, 5, 0), 180);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D + 1, 0, 2, 0), T(D + 1, 0, 5, 0), Source::Normal, 0);
+}
+
+void test_earliest_open_window_wins() {
+    Scheduler s;
+    s.setSchedule(sch("25500:300,25200:1800"), D);
+    s.setFetchOk(true);
+    TickResult r = s.tick(T(D, 7, 6, 0), 0);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 29, 59), 1439);
+    TEST_ASSERT_TRUE(r.pumpOn);
+    r = s.tick(T(D, 7, 30, 0), 1440);
+    TEST_ASSERT_FALSE(r.pumpOn);
+    expectEvent(r, T(D, 7, 6, 0), T(D, 7, 30, 0), Source::Normal, 0);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_starts_at_entry_and_stops_after_duration);
@@ -219,5 +285,10 @@ int main() {
     RUN_TEST(test_backward_clock_jump_still_stops_by_monotonic);
     RUN_TEST(test_skipped_entry_not_reported_twice);
     RUN_TEST(test_no_schedule_does_nothing);
+    RUN_TEST(test_rest_survives_backward_clock_jump);
+    RUN_TEST(test_persisted_future_lastStop_blocks);
+    RUN_TEST(test_rest_boundary_599_600);
+    RUN_TEST(test_resume_across_midnight);
+    RUN_TEST(test_earliest_open_window_wins);
     return UNITY_END();
 }
