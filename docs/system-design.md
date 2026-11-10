@@ -127,7 +127,7 @@ Authorization: Bearer <Token>
     {"type": "stop",    "at": "2026-11-10T07:05:00+07:00", "source": "today", "reason": "done"},
     {"type": "start",   "at": "2026-11-10T11:00:00+07:00", "source": "today"},
     {"type": "stop",    "at": "2026-11-10T11:30:00+07:00", "source": "today", "reason": "capped"},
-    {"type": "skipped", "at": "2026-11-10T11:35:00+07:00", "source": "today", "reason": "rest"}
+    {"type": "skipped", "at": "2026-11-10T11:32:00+07:00", "source": "today", "reason": "rest"}
   ]
 }
 ```
@@ -161,7 +161,7 @@ ESP gửi JSON không khoảng trắng, khoá theo đúng thứ tự trên (`tem
 |---|---|---|---|
 | `start` | lúc bật bơm | — (không có khoá) | Bơm bật, kể cả tưới bù sau mất điện / khi nhận lịch mới. |
 | `stop` | lúc tắt bơm | `done` \| `capped` \| `abort` | Bơm tắt. `done`: chạy hết duration. `capped`: phiên bị cắt ở hard-cap 30 phút (duration của mốc > 1800 s). `abort`: kết thúc giữa chừng vì đồng hồ không dùng được hoặc sắp chủ động khởi động lại — `at` = lúc bật + thời gian monotonic đã chạy. |
-| `skipped` | mốc bị bỏ (giờ của mốc, không phải lúc xét) | `rest` \| `busy` | Mốc tới giờ nhưng **không bật bơm**. `rest`: chưa nghỉ đủ 10 phút từ lần tắt trước. `busy`: bơm đang chạy phiên khác. |
+| `skipped` | mốc bị bỏ (giờ của mốc, không phải lúc xét) | `rest` \| `busy` | Mốc tới giờ nhưng **không bật bơm**. `rest`: chưa nghỉ đủ 3 phút từ lần tắt trước. `busy`: bơm đang chạy phiên khác. |
 
 - `at`: giờ VN dạng `YYYY-MM-DDTHH:MM:SS+07:00`.
 - `source`: `normal` (dòng 1) | `today` (dòng 2) | `failsafe` (phiên chạy khi lần fetch gần nhất bị lỗi — mất mạng / server lỗi — dù lịch cache đang dùng là dòng 1 hay dòng 2). `start` và `stop` của cùng một phiên luôn cùng `source`.
@@ -213,8 +213,8 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại �
 - Mỗi giây so giờ **đồng hồ hệ thống** (không đọc I2C) với lịch hiện hành; đến mốc thì bật bơm, tắt sau duration.
 - **Mỗi lần bơm đổi trạng thái ghi một event**: bật ⇒ `start`, tắt ⇒ `stop` (`reason` `done` / `capped` / `abort`); mốc bị bỏ ⇒ `skipped`. Tối đa 1 event mỗi tick (giây); `start` của phiên sau không bao giờ cùng tick với `stop` của phiên trước. Có event ⇒ báo network task gửi heartbeat sau ~3 s.
 - **Hard-cap 30 phút/phiên** — duration lớn hơn bị cắt còn 30 phút (bơm rửa xe không nên chạy liên tục lâu hơn); phiên bị cắt kết thúc bằng `stop` reason `capped`.
-- **Nghỉ tối thiểu 10 phút** giữa hai lần bật bơm (chống bật/tắt dồn dập — kẻ thù chính của tuổi thọ bơm).
-  - Mốc tới giờ mà chưa nghỉ đủ 10 phút ⇒ **bỏ mốc** (không hoãn), ghi event `skipped` reason `rest`.
+- **Nghỉ tối thiểu 3 phút** giữa hai lần bật bơm (chống bật/tắt dồn dập — kẻ thù chính của tuổi thọ bơm).
+  - Mốc tới giờ mà chưa nghỉ đủ 3 phút ⇒ **bỏ mốc** (không hoãn), ghi event `skipped` reason `rest`.
   - Thời điểm tắt bơm gần nhất (lastStop) lưu trong AT24C32 để quy tắc này còn hiệu lực qua reboot. Ở cả hai chế độ, lastStop còn có bản sao trong RAM `RTC_NOINIT` (magic + check) giữ qua reset mềm, WDT, panic, brownout; lúc boot nạp giá trị mới hơn giữa AT24C32 và bản sao, bản sao bị bỏ khi khởi động do cấp điện lại (`ESP_RST_POWERON`) ⇒ chế độ RAM (không có AT24C32) chỉ mất lastStop khi mất điện, và lần tắt do mất điện được miễn quy tắc nghỉ.
 - **Phiên đang chạy luôn chạy nốt** theo duration lúc bắt đầu, kể cả khi lịch mới về giữa chừng hoặc qua 0h00.
 - Mốc tới giờ khi bơm đang chạy phiên khác ⇒ **bỏ mốc** (phiên đang chạy không kéo dài), ghi event `skipped` reason `busy`.

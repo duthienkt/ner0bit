@@ -4,7 +4,7 @@
 #include "schedule.h"
 
 constexpr uint32_t kHardCap = 1800;
-constexpr uint32_t kMinRest = 600;
+constexpr uint32_t kMinRest = 180;
 
 struct TickResult {
     bool pumpOn;

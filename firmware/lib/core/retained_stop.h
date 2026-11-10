@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // Bản sao lastStop trong RAM giữ qua reset mềm (RTC_NOINIT_ATTR ở src/shared.cpp): còn nguyên qua
-// ESP.restart(), WDT, panic, brownout; mất (rác) khi cấp điện lại. Nhờ đó quy tắc nghỉ 600 s vẫn
+// ESP.restart(), WDT, panic, brownout; mất (rác) khi cấp điện lại. Nhờ đó quy tắc nghỉ 180 s vẫn
 // đúng sau reset mềm cả ở chế độ RAM (không có AT24C32). Mất điện ⇒ bản sao coi như không có:
 // lần tắt do mất điện được miễn quy tắc nghỉ. Logic thuần, không Arduino.
 
