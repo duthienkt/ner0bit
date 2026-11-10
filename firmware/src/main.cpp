@@ -2,13 +2,17 @@
 // loop(): scheduler bơm 1 lần/giây theo đồng hồ hệ thống. Network task (net_task) chạy song song:
 // WiFi, NTP, heartbeat. Module DS3231 + AT24C32 tuỳ chọn (xem shared.h).
 // Chế độ cấu hình (portal) thay cho network task khi chưa có cấu hình hoặc giữ BOOT lúc boot.
+// Watchdog: loop task trong task watchdog (10 s, panic ⇒ reset); net task giám sát bằng dấu "còn
+// sống" (net_watch.h) vì một lần POST HTTPS có thể chặn vài chục giây hợp lệ.
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <esp_task_wdt.h>
 
 #include "config_store.h"
 #include "led_pattern.h"
 #include "net_task.h"
+#include "net_watch.h"
 #include "pins.h"
 #include "portal.h"
 #include "pump.h"
@@ -20,6 +24,52 @@
 static char s_schedBody[kScheduleBodyMax];  // static: không chiếm stack loopTask
 static Schedule s_schedule;
 static NetConfig s_cfg;
+
+constexpr uint32_t kLoopWdtMs = 10000;  // loop task (và vòng lặp portal) phải nuôi WDT trong 10 s
+// USB CDC: host đã nhận cổng mà không đọc (cắm máy tính lấy điện, chưa mở Serial) ⇒ mỗi
+// Serial.write chờ tới 20 × timeout. Mặc định 100 ms ⇒ ~2 s mỗi dòng log, vài dòng trong một nhịp
+// loop là chạm watchdog. 20 ms ⇒ ≤ 0,4 s mỗi dòng; host đọc bình thường không bị ảnh hưởng.
+constexpr uint32_t kSerialTxTimeoutMs = 20;
+
+// Task watchdog của IDF: timeout 10 s, panic khi hết hạn (⇒ reset, lý do task_wdt), giữ nguyên
+// việc giám sát idle task theo sdkconfig; rồi thêm loop task. Từ đây loop task phải nuôi WDT: core
+// làm mỗi vòng loop(), portal::run tự làm trong vòng lặp của nó.
+static void armLoopWatchdog() {
+    esp_task_wdt_config_t cfg = {};
+    cfg.timeout_ms = kLoopWdtMs;
+#if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+    cfg.idle_core_mask = 1u << 0;
+#else
+    cfg.idle_core_mask = 0;
+#endif
+    cfg.trigger_panic = true;
+    esp_err_t err = esp_task_wdt_reconfigure(&cfg);
+    if (err == ESP_ERR_INVALID_STATE) err = esp_task_wdt_init(&cfg);  // TWDT chưa khởi tạo
+    if (err != ESP_OK) {
+        nlog("[main] lỗi cấu hình watchdog (%s) — chạy không có watchdog\n", esp_err_to_name(err));
+        return;
+    }
+    enableLoopWDT();
+    if (esp_task_wdt_status(nullptr) != ESP_OK) {
+        nlogln("[main] lỗi thêm loop task vào watchdog — chạy không có watchdog");
+        return;
+    }
+    nlog("[main] watchdog vòng lặp chính: %lu s\n", (unsigned long)(kLoopWdtMs / 1000));
+}
+
+// Net task không đóng dấu "còn sống" quá kNetStaleS ⇒ khởi động lại, nhưng chỉ khi bơm tắt (bơm
+// đang chạy ⇒ chờ hết phiên). Sau reset, tưới bù và lastStop giữ qua reset lo phần còn lại.
+static void checkNetTask() {
+    uint32_t alive = 0;
+    if (!netTaskAliveAt(alive)) return;  // không có net task (tạo lỗi) ⇒ không giám sát
+    const uint32_t now = monoSec();      // đọc sau dấu ⇒ dấu không "mới hơn" now
+    if (!netRestartDue(now, alive, kNetStaleS, pump::isOn())) return;
+    nlog("[main] luồng mạng không phản hồi %lu s (> %lu s), bơm đang tắt ⇒ khởi động lại\n",
+         (unsigned long)(now - alive), (unsigned long)kNetStaleS);
+    stopPumpForRestart();
+    delay(100);  // cho Serial in xong
+    ESP.restart();
+}
 
 // Mỗi module một dòng log, rồi một dòng chế độ lưu trữ.
 static void logModules(ModuleState ds, ModuleState at, bool clockValid, uint32_t rtcUtc) {
@@ -69,6 +119,9 @@ void setup() {
     // 1. Bơm tắt trước mọi thứ, rồi Serial, lock, LED (active-LOW, tắt).
     pump::begin();
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT && ARDUINO_USB_MODE
+    Serial.setTxTimeoutMs(kSerialTxTimeoutMs);  // Serial là HWCDC
+#endif
     sharedInit();
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
@@ -76,6 +129,7 @@ void setup() {
     // 2. Cửa sổ 5 s: giữ BOOT ≥ 3 s ⇒ chế độ cấu hình.
     const bool button = portal::bootButtonHeld();
     nlog("[main] Ner0bit fw %s, nút BOOT: %s\n", kFwVersion, button ? "giữ ⇒ setup" : "không");
+    nlog("[main] lý do khởi động: %s\n", resetReasonText());
 
     // 3. I2C, module DS3231 / AT24C32 (đều tuỳ chọn), đồng hồ hệ thống, storage.
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
@@ -124,7 +178,11 @@ void setup() {
         nlog("[main] lịch: %s (nhận ngày %lu)\n", line, (unsigned long)fetchDay);
     }
 
-    // 5. Chế độ cấu hình hoặc chạy thường.
+    // 5. Watchdog loop task — sau cửa sổ 5 s và khởi tạo module, trước portal (không return) /
+    // net task.
+    armLoopWatchdog();
+
+    // 6. Chế độ cấu hình hoặc chạy thường.
     const bool hasCfg = config::load(s_cfg);
     if (!hasCfg || button) {
         nlogln(hasCfg ? "[main] vào chế độ cấu hình (nút BOOT)"
@@ -134,8 +192,9 @@ void setup() {
     startNetTask(s_cfg);
 }
 
-void loop() {
+void loop() {  // core nuôi watchdog trước mỗi lần gọi loop()
     schedulerTick();  // tự giới hạn 1 lần / 1000 ms
+    checkNetTask();   // sau tick: pump::isOn() là trạng thái mới nhất
     // Đèn báo trạng thái (active-LOW): bơm chạy chớp nhanh, chưa có giờ chớp đôi, mất WiFi chớp
     // dài, bình thường nháy ngắn mỗi 5 s. Đọc trạng thái không cần g_lock (chỉ để hiển thị).
     const LedState led = pickLed(pump::isOn(), g_clockValid, WiFi.isConnected());

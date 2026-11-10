@@ -4,10 +4,14 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_task_wdt.h>
 #include <string.h>
 
 #include "pins.h"
 #include "shared.h"
+
+// Cờ của core (cores/esp32/main.cpp): true khi enableLoopWDT() đã thêm loop task vào watchdog.
+extern bool loopTaskWDTEnabled;
 
 namespace portal {
 
@@ -220,8 +224,12 @@ void run(const NetConfig* current) {
     nlog("[portal] AP \"%s\" (không mật khẩu), mở http://192.168.4.1/%s\n", kApSsid,
                   current ? " — 10 phút không lưu sẽ khởi động lại" : "");
 
+    // Vòng lặp này thay loop() (không bao giờ return) nên tự nuôi watchdog của loop task (setup()
+    // đã bật, timeout 10 s). handleClient() xong trong vài ms với client bình thường; client cố ý
+    // gửi rất chậm có thể giữ nó lâu hơn ⇒ watchdog reset (bơm tắt, boot lại) — chấp nhận.
     const uint32_t start = millis();
     for (;;) {
+        if (loopTaskWDTEnabled) esp_task_wdt_reset();  // như core làm trước mỗi loop()
         s_dns->processNextRequest();
         s_server->handleClient();
         schedulerTick();

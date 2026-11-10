@@ -112,6 +112,7 @@ Authorization: Bearer <Token>
 {
   "id": "a4cf12b8e901",
   "fw": "0.1.0",
+  "reset": "poweron",
   "uptime_s": 123456,
   "rssi": -58,
   "pump_on": false,
@@ -147,6 +148,7 @@ ESP gửi JSON không khoảng trắng, khoá theo đúng thứ tự trên (`tem
 - `Authorization`: token bí mật điền lúc setup. Hệ thống chỉ có **1 thiết bị**: server so khớp cả token lẫn `id`; sai một trong hai ⇒ trả 401/403 (ESP coi như lỗi, xem dưới).
 - `id`: định danh thiết bị — MAC address của ESP32 (12 hex chữ thường, tự sinh). Log tự chứa đủ thông tin, không phụ thuộc URL.
 - `fw`: phiên bản firmware. `uptime_s`: giây kể từ boot (monotonic). `rssi`: dBm của WiFi. `pump_on`: bơm đang chạy lúc gửi.
+- `reset`: lý do của lần khởi động này (`esp_reset_reason()`), giữ nguyên tới lần boot sau — `"poweron"` (cấp điện) | `"sw"` (firmware chủ động khởi động lại) | `"panic"` | `"int_wdt"` | `"task_wdt"` (watchdog: vòng lặp chính treo) | `"wdt"` (watchdog khác) | `"brownout"` (sụt áp) | `"deepsleep"` | `"ext"` (chân reset) | `"unknown"` (lý do khác, vd. reset qua USB). Xem "Watchdog" trong "Scheduler & an toàn bơm".
 - `heap_free`: heap trống lúc gửi (`esp_get_free_heap_size()`, byte). `heap_min`: heap trống thấp nhất từ lúc boot (`esp_get_minimum_free_heap_size()`, byte) — theo dõi rò bộ nhớ.
 - `ds3231`, `at24c32`: trạng thái module — `"ok"` | `"absent"` (không có chip) | `"lost_power"` (chỉ DS3231: cờ OSF bật lúc boot, giữ tới lần boot sau) | `"failed"` (có chip nhưng lỗi I/O, đã bỏ dùng). Xem "Module DS3231 + AT24C32 tuỳ chọn".
 - `temp_c`: nhiệt độ cảm biến trong DS3231 (°C, bước 0,25, in 2 chữ số thập phân, có thể âm). **Vắng** khi không có / không dùng DS3231 hoặc lần đọc này lỗi.
@@ -223,6 +225,10 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại �
   - Vd. mất điện lúc 07:03 giữa phiên 07:00–07:05, có điện lại 07:04 ⇒ tưới tiếp 1 phút. (Tắt do mất điện không ghi "thời điểm tắt bơm", nên quy tắc nghỉ không chặn phần bù này.)
   - Phiên bị mất điện chỉ có event `start` (không có `stop`); phần bù là cặp `start` 07:04 / `stop` 07:05 mới.
 - Mọi lần bật/tắt (kể cả bị cap, tưới bù, abort) và mốc bị bỏ đều nằm trong `events` của heartbeat.
+- **Watchdog** — thiết bị không bao giờ được treo im lặng rồi lỡ mốc tưới:
+  - Vòng lặp chính (scheduler bơm; ở chế độ cấu hình là vòng lặp portal) nằm trong task watchdog của ESP-IDF, timeout **10 s**: quá hạn không nuôi ⇒ panic ⇒ reset, bơm tắt ngay lúc boot. Watchdog bật cuối `setup()`, sau cửa sổ nút BOOT 5 s và khởi tạo module.
+  - Network task **không** nằm trong watchdog (một lần POST HTTPS có thể chặn ~30 s hợp lệ, mỗi pha tới 10 s); thay vào đó mỗi vòng lặp nó đóng dấu "còn sống". Dấu cũ hơn **180 s** ⇒ log một dòng rồi khởi động lại — nhưng **chỉ khi bơm đang tắt**; bơm đang chạy thì chờ hết phiên (tưới được ưu tiên).
+  - Sau reset do watchdog, **tưới bù** chạy nốt phần còn lại của khung mốc và lastStop (bản sao giữ qua reset) giữ quy tắc nghỉ. Lý do khởi động in ra log lúc boot và gửi trong trường `reset` của heartbeat.
 
 ## Đồng bộ thời gian
 

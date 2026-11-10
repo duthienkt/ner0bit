@@ -49,6 +49,9 @@ char s_lastBody[kScheduleBodyMax];  // body lịch đã áp lần trước ⇒ l
 uint32_t s_lastDay = 0;
 TimeTrust s_trust;                              // chỉ net task dùng, không cần g_lock
 TaskHandle_t volatile s_task = nullptr;
+// monoSec() lúc net task bắt đầu vòng lặp gần nhất. Chỉ net task ghi (và startNetTask, trước khi
+// tạo task); loop() đọc. uint32 căn lề ⇒ đọc/ghi nguyên tử trên RISC-V 32 bit.
+volatile uint32_t s_aliveAt = 0;
 
 // Kết quả SNTP chờ net task xét (sntp_sync_time ghi từ task lwIP). Bảo vệ bằng s_ntpMux.
 portMUX_TYPE s_ntpMux = portMUX_INITIALIZER_UNLOCKED;
@@ -286,6 +289,7 @@ bool heartbeat() {
 
     HeartbeatInfo info{s_id,
                        kFw,
+                       resetReasonCode(),
                        monoSec(),
                        (int)WiFi.RSSI(),
                        pumpOn,
@@ -407,6 +411,7 @@ void netTask(void*) {
     WiFi.mode(WIFI_STA);     // chỉ STA — mất WiFi thì thử lại, không bao giờ mở AP
     WiFi.setAutoReconnect(true);
     wifiBegin();
+    s_aliveAt = monoSec();
 
     bool wasConnected = false;
     bool ntpStarted = false;
@@ -422,6 +427,9 @@ void netTask(void*) {
         // Chờ tối đa 1 s; schedulerTick có event ⇒ notifyNetTask đánh thức sớm.
         const bool notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kLoopMs)) > 0;
         const uint32_t now = monoSec();
+        // Còn sống: loop() khởi động lại nếu dấu này cũ hơn kNetStaleS — đủ rộng cho một
+        // heartbeat HTTPS chậm nhất (mỗi pha connect / TLS / response / body tới 10 s).
+        s_aliveAt = now;
         const bool connected = WiFi.status() == WL_CONNECTED;
         // Hạn tính từ event đầu tiên, event đến sau trong 3 s không dời hạn ⇒ gộp, trễ tối đa ~3 s.
         if (notified && !eventHb) {
@@ -524,10 +532,17 @@ void startNetTask(const NetConfig& cfg) {
     s_cfg.pass[sizeof s_cfg.pass - 1] = '\0';
     s_cfg.url[sizeof s_cfg.url - 1] = '\0';
     s_cfg.token[sizeof s_cfg.token - 1] = '\0';
+    s_aliveAt = monoSec();  // trước khi tạo task: loop() có thể đọc ngay sau đó
     TaskHandle_t t = nullptr;
     if (xTaskCreate(netTask, "net", kTaskStack, nullptr, 1, &t) != pdPASS) {
         nlogln("[net] lỗi: không tạo được task mạng");
         return;
     }
     s_task = t;
+}
+
+bool netTaskAliveAt(uint32_t& monoSecStamp) {
+    if (!s_task) return false;
+    monoSecStamp = s_aliveAt;
+    return true;
 }
