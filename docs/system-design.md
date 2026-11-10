@@ -163,6 +163,13 @@ Lỗi POST / timeout / status ≠ 200 ⇒ ESP giữ lịch cache, thử lại sa
 
 - Có mạng: NTP (múi UTC+7), định kỳ hiệu chỉnh DS3231.
 - Mất mạng: tin DS3231 (pin onboard giữ giờ).
+- **NTP không xác thực** — ai giả được gói NTP trong LAN là xê dịch được đồng hồ (bơm tưới sai giờ). Nên ESP không ghi giờ NTP vào DS3231 một cách mù quáng (`TimeTrust`, `firmware/lib/core/time_trust.*`):
+  1. Giờ NTP < 2026-01-01 hoặc ≥ **2100-01-01** (4102444800) ⇒ vô lý, bỏ.
+  2. Đồng hồ chưa hợp lệ (DS3231 mất nguồn — cờ OSF, chưa từng chỉnh, hoặc đọc lỗi) ⇒ nhận NTP: ghi DS3231, đồng hồ hợp lệ.
+  3. Đồng hồ hợp lệ, |NTP − DS3231| ≤ **300 s** ⇒ nhận (hiệu chỉnh trôi bình thường).
+  4. Đồng hồ hợp lệ, lệch > 300 s ⇒ **không ghi** DS3231; giữ giờ NTP làm *ứng viên* (kèm mốc `monoSec()`) và heartbeat ngay. Ứng viên chỉ được xác nhận bằng header **`Date`** của một response **200** qua HTTPS sau đó (TLS xác thực server nên không giả được): nếu `Date` nằm trong ±300 s của ứng viên cộng thời gian monotonic đã trôi ⇒ ghi DS3231. Lệch hơn ⇒ bỏ ứng viên, ghi log, giữ nguyên DS3231. Response không có `Date` hợp lệ ⇒ ứng viên tiếp tục chờ; NTP mới lệch lớn thay ứng viên cũ, NTP khớp DS3231 xoá nó.
+- Server **phải gửi header `Date`** dạng IMF-fixdate (RFC 7231: `Sun, 06 Nov 1994 08:49:37 GMT` — PHP/nginx/Apache/Cloudflare đều tự gửi). Parser chặt (`parseHttpDate`, `firmware/lib/core/http_date.*`): đúng 29 ký tự, không nhận định dạng RFC 850/asctime.
+- Giờ hệ thống của ESP (`time()`) vẫn do SNTP đặt, nhưng không dùng cho scheduler (chỉ DS3231) và không ảnh hưởng TLS: mbedTLS của Arduino-ESP32 build không bật `MBEDTLS_HAVE_TIME_DATE` nên không kiểm hạn chứng chỉ.
 
 ## Failsafe
 

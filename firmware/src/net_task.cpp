@@ -13,9 +13,11 @@
 #include "ca_bundle.h"
 #include "ds3231.h"
 #include "heartbeat.h"
+#include "http_date.h"
 #include "pump.h"
 #include "schedule.h"
 #include "shared.h"
+#include "time_trust.h"
 
 namespace {
 
@@ -27,7 +29,6 @@ constexpr uint32_t kHeartbeatS = 300;
 constexpr uint32_t kDrainS = 5;                 // 200 OK mà queue còn events ⇒ gửi tiếp sau 5 s
 constexpr uint32_t kNtpIntervalS = 6 * 3600;    // chỉnh DS3231 theo NTP mỗi 6 giờ
 constexpr uint32_t kHttpTimeoutMs = 10000;
-constexpr uint32_t kMinValidUtc = 1767225600;   // 2026-01-01T00:00:00Z
 
 NetConfig s_cfg;
 char s_id[13];                                  // MAC STA, 12 hex chữ thường
@@ -38,6 +39,7 @@ Event s_events[kMaxEventsPerHeartbeat];
 char s_json[kHeartbeatBufSize];
 char s_body[kScheduleBodyMax];
 Schedule s_sched;
+TimeTrust s_trust;                              // chỉ net task dùng, không cần g_lock
 
 volatile bool s_ntpSynced = false;              // set từ callback SNTP (task lwIP)
 
@@ -65,28 +67,82 @@ void ntpStart() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
 
-// Gọi khi callback SNTP báo đã sync. true nếu đồng hồ vừa chuyển từ không hợp lệ ⇒ hợp lệ.
+// Gọi khi callback SNTP báo đã sync. NTP không xác thực ⇒ chỉ ghi DS3231 theo quy tắc TimeTrust
+// (docs/system-design.md, "Đồng bộ thời gian"). true nếu nên heartbeat ngay: đồng hồ vừa chuyển
+// từ không hợp lệ ⇒ hợp lệ (áp lịch), hoặc có ứng viên lệch lớn cần header Date xác nhận.
 bool ntpApply() {
-    const time_t now = time(nullptr);
-    if (now < (time_t)kMinValidUtc) {
-        Serial.printf("[net] NTP: giờ vô lý (%lld), bỏ qua\n", (long long)now);
-        return false;
-    }
-    const uint32_t utc = (uint32_t)now;
-    bool ok;
+    const long long sys = (long long)time(nullptr);
+    const uint32_t ntp = sys < 0 ? 0u : (sys > 0xFFFFFFFFLL ? 0xFFFFFFFFu : (uint32_t)sys);
+    const uint32_t mono = monoSec();
+    NtpVerdict v;
+    uint32_t rtc = 0;
     bool wasValid;
+    bool rtcOk;
+    bool ok = false;
     {
         SharedLock lock;
         wasValid = g_clockValid;
+        rtcOk = wasValid && ds3231::readUtc(rtc);  // đọc lỗi ⇒ coi như đồng hồ chưa hợp lệ (R4)
+        v = s_trust.onNtp(ntp, rtc, rtcOk, mono);
+        if (v == NtpVerdict::Accept) {
+            ok = ds3231::writeUtc(ntp);
+            if (ok) g_clockValid = true;
+        }
+    }
+    const long long skew = (long long)ntp - (long long)rtc;
+    switch (v) {
+        case NtpVerdict::Reject:
+            Serial.printf("[net] NTP: giờ vô lý (%llu), bỏ qua\n", (unsigned long long)ntp);
+            return false;
+        case NtpVerdict::Pending:
+            Serial.printf("[net] NTP: lệch %lld s so với DS3231 (> %lu s) — chưa ghi, chờ header "
+                          "Date qua HTTPS xác nhận\n",
+                          skew, (unsigned long)kMaxClockSkewS);
+            return true;
+        case NtpVerdict::Accept:
+            break;
+    }
+    if (!ok) {
+        Serial.println("[net] NTP: ghi DS3231 lỗi");
+    } else if (rtcOk) {
+        Serial.printf("[net] NTP: đã chỉnh DS3231 utc=%lu (lệch %lld s)\n", (unsigned long)ntp, skew);
+    } else {
+        Serial.printf("[net] NTP: đã chỉnh DS3231 utc=%lu (đồng hồ trước đó chưa hợp lệ)\n",
+                      (unsigned long)ntp);
+    }
+    return ok && !wasValid;
+}
+
+// Header Date của response 200 qua HTTPS (TLS đã xác thực server) ⇒ xác nhận hoặc bỏ ứng viên
+// NTP đang chờ. mono: monoSec() lúc nhận response. Không giữ g_lock khi gọi.
+void checkServerDate(const char* date, uint32_t mono) {
+    if (!s_trust.hasPending()) return;
+    uint32_t dateUtc = 0;
+    if (!parseHttpDate(date, dateUtc)) {
+        Serial.printf("[net] Date: header thiếu hoặc sai định dạng (\"%s\"), ứng viên NTP vẫn chờ\n",
+                      date);
+        return;
+    }
+    uint32_t utc = 0;
+    if (s_trust.onServerDate(dateUtc, mono, utc) != DateVerdict::Confirm) {
+        Serial.printf("[net] NTP: ứng viên không khớp header Date (%lu) quá %lu s ⇒ bỏ, giữ "
+                      "DS3231\n",
+                      (unsigned long)dateUtc, (unsigned long)kMaxClockSkewS);
+        return;
+    }
+    bool ok;
+    {
+        SharedLock lock;
+        utc += monoSec() - mono;  // thời gian trôi từ lúc nhận response tới giờ
         ok = ds3231::writeUtc(utc);
         if (ok) g_clockValid = true;
     }
     if (ok) {
-        Serial.printf("[net] NTP: đã chỉnh DS3231 utc=%lu\n", (unsigned long)utc);
+        Serial.printf("[net] NTP: header Date xác nhận, đã chỉnh DS3231 utc=%lu\n",
+                      (unsigned long)utc);
     } else {
-        Serial.println("[net] NTP: ghi DS3231 lỗi");
+        Serial.println("[net] NTP: header Date xác nhận nhưng ghi DS3231 lỗi");
     }
-    return ok && !wasValid;
 }
 
 void markFetchFailed() {
@@ -153,7 +209,10 @@ bool heartbeat() {
     }
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", auth);
+    const char* collect[] = {"Date"};
+    http.collectHeaders(collect, 1);
     const int code = http.POST((uint8_t*)s_json, len);
+    const uint32_t respMono = monoSec();
 
     if (code != 200) {
         if (code < 0) {
@@ -166,8 +225,11 @@ bool heartbeat() {
         return false;
     }
 
+    char date[32];
+    strlcpy(date, http.header("Date").c_str(), sizeof date);  // dài hơn ⇒ cụt ⇒ parse lỗi
     const bool bodyOk = readBody(http);
     http.end();
+    checkServerDate(date, respMono);  // trước khi áp lịch: fetchDay theo giờ đã chỉnh
     const bool parsed = bodyOk && parseSchedule(s_body, s_sched);
 
     bool applied = false;
@@ -265,6 +327,7 @@ void netTask(void*) {
             ntpLastOk = now;
             ntpEverOk = true;
             // Đồng hồ vừa hợp lệ ⇒ heartbeat ngay để áp lịch (lần trước có thể đã bỏ vì giờ sai).
+            // Có ứng viên lệch lớn ⇒ heartbeat ngay để header Date xác nhận sớm.
             if (ntpApply()) nextHb = now;
         }
 
