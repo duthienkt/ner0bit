@@ -156,7 +156,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.passwordMatches(r.PostFormValue("password")) {
-		s.loginFailed(ip, now)
+		if !s.loginFailed(ip, now) {
+			s.slowdown()
+		}
 		log.Printf("UI: đăng nhập sai từ %s", ip)
 		s.renderPage(w, http.StatusUnauthorized, pageData{Mode: "login", Error: "Sai mật khẩu."})
 		return
@@ -209,16 +211,13 @@ func (s *Server) loginBlocked(ip string, now time.Time) (time.Time, bool) {
 	}
 	f := s.loginFails[ip]
 	if f == nil {
-		// Map đầy toàn mục đang bị khoá ⇒ đang bị dò hàng loạt: chặn cả nguồn mới tới hết cửa sổ.
-		if len(s.loginFails) >= maxLoginIPs && s.oldestUnlockedLocked() == "" {
-			return now.Add(loginWindow), true
-		}
-		return time.Time{}, false
+		return time.Time{}, false // nguồn chưa ghi nhận: không chặn (không khoá oan chủ nhà)
 	}
 	return f.first.Add(loginWindow), f.count >= maxLoginFailures
 }
 
-func (s *Server) loginFailed(ip string, now time.Time) {
+// loginFailed ghi một lần sai; trả false nếu không ghi được (map đầy toàn mục bị khoá).
+func (s *Server) loginFailed(ip string, now time.Time) bool {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if s.loginFails == nil {
@@ -231,7 +230,8 @@ func (s *Server) loginFailed(ip string, now time.Time) {
 			// đang bị khoá — nếu không, lấp map bằng IP khác là gỡ được khoá của chính mình.
 			oldest := s.oldestUnlockedLocked()
 			if oldest == "" {
-				return // toàn mục bị khoá: không ghi thêm; loginBlocked đã chặn nguồn mới
+				// Toàn mục bị khoá (đang bị dò hàng loạt): không ghi nguồn mới; caller làm chậm lần sai.
+				return false
 			}
 			delete(s.loginFails, oldest)
 		}
@@ -239,6 +239,16 @@ func (s *Server) loginFailed(ip string, now time.Time) {
 		s.loginFails[ip] = f
 	}
 	f.count++
+	return true
+}
+
+// slowdown: trễ cố định cho lần đăng nhập sai không ghi nhận được (map đầy). Test thay bằng hàm rỗng.
+func (s *Server) slowdown() {
+	if s.loginSlowdown != nil {
+		s.loginSlowdown()
+		return
+	}
+	time.Sleep(time.Second)
 }
 
 // oldestUnlockedLocked trả khoá của mục chưa bị khoá (count < maxLoginFailures) cũ nhất, "" nếu

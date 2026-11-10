@@ -44,8 +44,9 @@ type Server struct {
 
 	scheduleMu sync.Mutex // tuần tự hoá PUT /api/schedule
 
-	loginMu    sync.Mutex
-	loginFails map[string]*loginFailures // theo IP client
+	loginMu       sync.Mutex
+	loginFails    map[string]*loginFailures // theo IP client
+	loginSlowdown func()                    // nil ⇒ ngủ 1 s (xem slowdown); test thay bằng hàm rỗng
 }
 
 type lastHeartbeat struct {

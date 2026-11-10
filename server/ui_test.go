@@ -657,3 +657,26 @@ func TestLoginFailMapFullKeepsLockedEntries(t *testing.T) {
 		t.Errorf("IP đã khoá sau khi lấp map: code %d, want 429", rec.Code)
 	}
 }
+
+// Map đầy toàn mục bị khoá (đang bị dò hàng loạt): nguồn mới nhập ĐÚNG mật khẩu vẫn vào được —
+// kẻ xấu không khoá được chủ nhà. Sai thì bị trễ (loginSlowdown) chứ không bị ghi.
+func TestLoginMapFullOfLockedStillAdmitsCorrectPassword(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	s.loginSlowdown = func() {}
+	slowed := 0
+	for i := 0; i < maxLoginIPs; i++ {
+		for j := 0; j < maxLoginFailures; j++ {
+			login(s, "sai", withRemote(fmt.Sprintf("10.%d.%d.%d:1", i>>16&255, i>>8&255, i&255)))
+		}
+	}
+	s.loginSlowdown = func() { slowed++ }
+	if rec := login(s, "sai", withRemote("192.0.2.50:1")); rec.Code != http.StatusUnauthorized {
+		t.Errorf("nguồn mới sai mật khẩu: code %d, want 401", rec.Code)
+	}
+	if slowed != 1 {
+		t.Errorf("nguồn mới sai khi map đầy phải bị làm chậm, slowed=%d", slowed)
+	}
+	if rec := login(s, testPassword, withRemote("192.0.2.51:1")); rec.Code != http.StatusSeeOther {
+		t.Errorf("chủ nhà đúng mật khẩu khi map đầy: code %d, want 303", rec.Code)
+	}
+}
