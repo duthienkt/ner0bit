@@ -11,6 +11,7 @@
 #include "portal.h"
 #include "pump.h"
 #include "schedule.h"
+#include "schedule_format.h"
 #include "schedule_store.h"
 #include "shared.h"
 
@@ -72,7 +73,7 @@ void setup() {
 
     // 2. Cửa sổ 5 s: giữ BOOT ≥ 3 s ⇒ chế độ cấu hình.
     const bool button = portal::bootButtonHeld();
-    Serial.printf("[main] Ner0bit fw 0.1.0, nút BOOT: %s\n", button ? "giữ ⇒ setup" : "không");
+    Serial.printf("[main] Ner0bit fw %s, nút BOOT: %s\n", kFwVersion, button ? "giữ ⇒ setup" : "không");
 
     // 3. I2C, module DS3231 / AT24C32 (đều tuỳ chọn), đồng hồ hệ thống, storage.
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
@@ -115,6 +116,11 @@ void setup() {
     }
     Serial.printf("[main] lịch cache: %s\n",
                   cacheOk ? "đã nạp" : (hasCache ? "lỗi, bỏ qua" : "chưa có"));
+    if (cacheOk) {
+        static char line[kScheduleLogMax];  // static: không chiếm stack loop task
+        formatSchedule(s_schedule, line, sizeof line);
+        Serial.printf("[main] lịch: %s (nhận ngày %lu)\n", line, (unsigned long)fetchDay);
+    }
 
     // 5. Chế độ cấu hình hoặc chạy thường.
     const bool hasCfg = config::load(s_cfg);

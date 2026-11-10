@@ -25,6 +25,7 @@ extern ModuleState g_at24c32;  // Absent | Ok | Failed (lỗi lúc boot hoặc g
 
 constexpr uint32_t kUtcOffset = 25200;  // UTC+7
 // Kích thước buffer (kể cả '\0') cho body lịch: body dài hơn bị coi là lịch lỗi, không cache.
+constexpr const char* kFwVersion = "0.2.0";  // in ra log lúc boot + trường "fw" của heartbeat
 constexpr size_t kScheduleBodyMax = 1024;
 
 // Tạo g_lock. Gọi một lần trong setup(), trước mọi truy cập dùng lock và trước startNetTask().

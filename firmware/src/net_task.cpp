@@ -17,13 +17,14 @@
 #include "http_date.h"
 #include "pump.h"
 #include "schedule.h"
+#include "schedule_format.h"
 #include "schedule_store.h"
 #include "shared.h"
 #include "time_trust.h"
 
 namespace {
 
-constexpr const char* kFw = "0.1.0";
+constexpr const char* kFw = kFwVersion;
 constexpr uint32_t kTaskStack = 12 * 1024;      // byte (ESP-IDF tính stack theo byte)
 constexpr uint32_t kLoopMs = 1000;
 constexpr uint32_t kWifiRetryS = 30;            // chưa vào được WiFi ⇒ begin lại sau 30 s
@@ -43,6 +44,9 @@ Event s_events[kMaxEventsPerHeartbeat];
 char s_json[kHeartbeatBufSize];
 char s_body[kScheduleBodyMax];
 Schedule s_sched;
+char s_schedLog[kScheduleLogMax];   // dòng log lịch dễ đọc (static: không chiếm stack task)
+char s_lastBody[kScheduleBodyMax];  // body lịch đã áp lần trước ⇒ log "MỚI" / "không đổi"
+uint32_t s_lastDay = 0;
 TimeTrust s_trust;                              // chỉ net task dùng, không cần g_lock
 TaskHandle_t volatile s_task = nullptr;
 
@@ -364,13 +368,21 @@ bool heartbeat() {
     }
 
     if (switched) logStorageFailover();
+    if (parsed) formatSchedule(s_sched, s_schedLog, sizeof s_schedLog);
     if (applied) {
         schedule_store::saveIfChanged(s_body, fetchDay, s_sched.l2 != Line2State::Missing);
-        Serial.printf("[net] 200: lịch mới (day %lu), queue còn %u\n", (unsigned long)fetchDay,
-                      (unsigned)remaining);
+        // Dòng 2 gắn với ngày nhận ⇒ cùng body nhưng sang ngày mới (có dòng 2) cũng tính là mới.
+        const bool changed = strcmp(s_body, s_lastBody) != 0 ||
+                             (s_sched.l2 != Line2State::Missing && fetchDay != s_lastDay);
+        strlcpy(s_lastBody, s_body, sizeof s_lastBody);
+        s_lastDay = fetchDay;
+        Serial.printf("[net] 200: lịch %s (day %lu), queue còn %u\n",
+                      changed ? "MỚI" : "không đổi", (unsigned long)fetchDay, (unsigned)remaining);
+        Serial.printf("[net] lịch: %s\n", s_schedLog);
     } else if (parsed) {
         Serial.printf("[net] 200: đồng hồ chưa dùng được, chưa áp lịch; queue còn %u\n",
                       (unsigned)remaining);
+        Serial.printf("[net] lịch (chưa áp): %s\n", s_schedLog);
     } else {
         Serial.printf("[net] 200: body lịch không hợp lệ, giữ cache; queue còn %u\n",
                       (unsigned)remaining);

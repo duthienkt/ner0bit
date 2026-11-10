@@ -13,7 +13,7 @@ constexpr int16_t kTempUnknown = INT16_MIN;
 
 struct HeartbeatInfo {
     const char* id;     // MAC 12 hex chữ thường
-    const char* fw;     // "0.1.0"
+    const char* fw;     // vd. "0.2.0"
     uint32_t uptimeS;
     int rssi;
     bool pumpOn;
