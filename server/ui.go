@@ -146,7 +146,7 @@ func (s *Server) renderPage(w http.ResponseWriter, status int, data pageData) {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	ip := s.clientIP(r)
+	ip := limiterKey(s.clientIP(r))
 	now := s.now()
 	if until, blocked := s.loginBlocked(ip, now); blocked {
 		mins := int(until.Sub(now).Minutes()) + 1
@@ -209,6 +209,10 @@ func (s *Server) loginBlocked(ip string, now time.Time) (time.Time, bool) {
 	}
 	f := s.loginFails[ip]
 	if f == nil {
+		// Map đầy toàn mục đang bị khoá ⇒ đang bị dò hàng loạt: chặn cả nguồn mới tới hết cửa sổ.
+		if len(s.loginFails) >= maxLoginIPs && s.oldestUnlockedLocked() == "" {
+			return now.Add(loginWindow), true
+		}
 		return time.Time{}, false
 	}
 	return f.first.Add(loginWindow), f.count >= maxLoginFailures
@@ -223,12 +227,11 @@ func (s *Server) loginFailed(ip string, now time.Time) {
 	f := s.loginFails[ip]
 	if f == nil {
 		if len(s.loginFails) >= maxLoginIPs {
-			// Đầy ⇒ bỏ mục cũ nhất, không khoá mọi IP mới (tránh bị ép khoá cả chủ nhà).
-			var oldest string
-			for k, v := range s.loginFails {
-				if oldest == "" || v.first.Before(s.loginFails[oldest].first) {
-					oldest = k
-				}
+			// Đầy ⇒ bỏ mục chưa bị khoá cũ nhất (không khoá oan mọi IP mới). Không bao giờ bỏ mục
+			// đang bị khoá — nếu không, lấp map bằng IP khác là gỡ được khoá của chính mình.
+			oldest := s.oldestUnlockedLocked()
+			if oldest == "" {
+				return // toàn mục bị khoá: không ghi thêm; loginBlocked đã chặn nguồn mới
 			}
 			delete(s.loginFails, oldest)
 		}
@@ -236,6 +239,31 @@ func (s *Server) loginFailed(ip string, now time.Time) {
 		s.loginFails[ip] = f
 	}
 	f.count++
+}
+
+// oldestUnlockedLocked trả khoá của mục chưa bị khoá (count < maxLoginFailures) cũ nhất, "" nếu
+// không có. Gọi khi đang giữ loginMu.
+func (s *Server) oldestUnlockedLocked() string {
+	var oldest string
+	var at time.Time
+	for k, v := range s.loginFails {
+		if v.count >= maxLoginFailures {
+			continue
+		}
+		if oldest == "" || v.first.Before(at) {
+			oldest, at = k, v.first
+		}
+	}
+	return oldest
+}
+
+// limiterKey: IPv6 gom theo /64 (một nhà/một máy thường có cả dải /64), IPv4 giữ nguyên.
+func limiterKey(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return ip
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 // clientIP: sau Cloudflare Tunnel (TrustCFHeader), IP thật nằm ở CF-Connecting-IP — Cloudflare ghi

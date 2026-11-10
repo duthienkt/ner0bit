@@ -627,3 +627,33 @@ func TestLoginFailMapFullEvictsOldest(t *testing.T) {
 		t.Errorf("map vượt giới hạn: %d", n)
 	}
 }
+
+// IPv6 cùng /64 tính là một nguồn: đổi địa chỉ trong dải /64 không né được giới hạn.
+func TestLoginRateLimitGroupsIPv6By64(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	for i := 0; i < 5; i++ {
+		login(s, "sai", withRemote(fmt.Sprintf("[2001:db8:1:2::%x]:443", i+1)))
+	}
+	if rec := login(s, testPassword, withRemote("[2001:db8:1:2::ffff]:443")); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("cùng /64: code %d, want 429", rec.Code)
+	}
+	if rec := login(s, testPassword, withRemote("[2001:db8:1:3::1]:443")); rec.Code != http.StatusSeeOther {
+		t.Errorf("/64 khác: code %d, want 303", rec.Code)
+	}
+}
+
+// Map đầy không được đẩy mục đang bị khoá ra ngoài (nếu không, lấp map bằng IP khác là gỡ được khoá).
+func TestLoginFailMapFullKeepsLockedEntries(t *testing.T) {
+	s, _, now := newUIServer(t, goodSchedule)
+	locked := withRemote("198.51.100.7:1")
+	for i := 0; i < maxLoginFailures; i++ {
+		login(s, "sai", locked)
+	}
+	*now = now.Add(time.Second)
+	for i := 0; i < maxLoginIPs+50; i++ {
+		login(s, "sai", withRemote(fmt.Sprintf("10.%d.%d.%d:1", i>>16&255, i>>8&255, i&255)))
+	}
+	if rec := login(s, testPassword, locked); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("IP đã khoá sau khi lấp map: code %d, want 429", rec.Code)
+	}
+}
