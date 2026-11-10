@@ -10,6 +10,7 @@ namespace ds3231 {
 static constexpr uint8_t kAddr = 0x68;
 static constexpr uint8_t kRegTime = 0x00;    // 0x00..0x06: giây, phút, giờ, thứ, ngày, tháng, năm
 static constexpr uint8_t kRegStatus = 0x0F;
+static constexpr uint8_t kRegTemp = 0x11;    // 0x11: °C có dấu, 0x12 bit 7:6: phần tư độ
 static constexpr uint8_t kOsf = 0x80;
 
 static uint8_t bcd2bin(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
@@ -85,10 +86,19 @@ bool writeUtc(uint32_t utc) {
     return writeRegs(kRegStatus, &status, 1);
 }
 
-bool lostPower() {
+bool oscStopped(bool& stopped) {
     uint8_t status;
-    if (!readRegs(kRegStatus, &status, 1)) return true;
-    return (status & kOsf) != 0;
+    if (!readRegs(kRegStatus, &status, 1)) return false;
+    stopped = (status & kOsf) != 0;
+    return true;
+}
+
+bool readTempQuarters(int16_t& quarters) {
+    uint8_t r[2];
+    if (!readRegs(kRegTemp, r, sizeof r)) return false;
+    // Số bù 2 mười bit: phần nguyên có dấu × 4 + phần tư (luôn dương) — vd. 0xFF,0xC0 = −0,25 °C.
+    quarters = (int16_t)((int8_t)r[0] * 4 + (r[1] >> 6));
+    return true;
 }
 
 }  // namespace ds3231

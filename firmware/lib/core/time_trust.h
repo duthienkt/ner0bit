@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-// Quyết định giờ nào được ghi vào DS3231. NTP không xác thực: ai giả được gói NTP trong LAN là
+// Quyết định giờ nào được đặt cho đồng hồ hệ thống (kèm ghi DS3231 nếu có module). NTP không xác thực: ai giả được gói NTP trong LAN là
 // xê dịch được đồng hồ (bơm tưới sai giờ). Neo thời gian là header `Date` của response 200 qua
 // HTTPS (TLS xác thực server); NTP chỉ được tinh chỉnh trong ±kTrustWindowS quanh giờ tin cậy.
 // Logic thuần, không Arduino — xem docs/system-design.md mục "Đồng bộ thời gian".
@@ -12,21 +12,21 @@ constexpr uint32_t kTrustWindowS = 5;          // lệch ≤ 5 s so với giờ 
 constexpr uint32_t kAnchorMaxAgeS = 24 * 3600; // neo Date cũ từ 24 h trở lên ⇒ hết hạn
 
 enum class NtpVerdict : uint8_t {
-    Accept,  // ghi DS3231 theo NTP
-    Reject,  // vô lý, hoặc lệch quá kTrustWindowS so với neo Date / DS3231: bỏ, ghi log
+    Accept,  // chỉnh đồng hồ theo NTP
+    Reject,  // vô lý, hoặc lệch quá kTrustWindowS so với neo Date / đồng hồ: bỏ, ghi log
 };
 
 enum class DateVerdict : uint8_t {
-    Write,     // DS3231 không hợp lệ hoặc lệch > kTrustWindowS ⇒ ghi writeUtc
-    NoChange,  // DS3231 khớp Date ⇒ không ghi
+    Write,     // đồng hồ không hợp lệ hoặc lệch > kTrustWindowS ⇒ đặt theo writeUtc
+    NoChange,  // đồng hồ khớp Date ⇒ không chỉnh
     Reject,    // Date ngoài [kMinValidUtc, kMaxValidUtc): bỏ, neo cũ giữ nguyên
 };
 
 class TimeTrust {
 public:
     // dateUtc: header Date của response 200 qua HTTPS. monoAtResp: monoSec() lúc nhận response.
-    // rtcUtc: giờ DS3231 vừa đọc (bỏ qua khi !rtcOk). rtcOk: g_clockValid và đọc DS3231 thành
-    // công. monoNow: monoSec() lúc đọc DS3231. dateNow = dateUtc + (monoNow − monoAtResp).
+    // rtcUtc: giờ đồng hồ hệ thống vừa đọc (bỏ qua khi !rtcOk). rtcOk: g_clockValid.
+    // monoNow: monoSec() lúc đọc rtcUtc. dateNow = dateUtc + (monoNow − monoAtResp).
     // Write ⇒ writeUtc = dateNow. Write và NoChange đều đặt neo (dateUtc, monoAtResp);
     // Reject không đổi writeUtc lẫn neo.
     DateVerdict onServerDate(uint32_t dateUtc, uint32_t monoAtResp, uint32_t rtcUtc, bool rtcOk,

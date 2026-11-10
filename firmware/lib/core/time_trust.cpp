@@ -35,6 +35,6 @@ NtpVerdict TimeTrust::onNtp(uint32_t ntpUtc, uint32_t rtcUtc, bool rtcOk, uint32
     if (anchorNow(mono, ref)) {
         return absDiff(ntpUtc, ref) <= kTrustWindowS ? NtpVerdict::Accept : NtpVerdict::Reject;
     }
-    if (!rtcOk) return NtpVerdict::Accept;  // bootstrap: DS3231 mất giờ, chưa có gì tốt hơn
+    if (!rtcOk) return NtpVerdict::Accept;  // bootstrap: đồng hồ chưa hợp lệ, chưa có gì tốt hơn
     return absDiff(ntpUtc, rtcUtc) <= kTrustWindowS ? NtpVerdict::Accept : NtpVerdict::Reject;
 }

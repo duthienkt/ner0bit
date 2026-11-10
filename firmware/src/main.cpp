@@ -1,21 +1,66 @@
 // Ner0bit firmware — ESP32-C3 Super Mini.
-// loop(): scheduler bơm 1 lần/giây. Network task (net_task) chạy song song: WiFi, NTP, heartbeat.
+// loop(): scheduler bơm 1 lần/giây theo đồng hồ hệ thống. Network task (net_task) chạy song song:
+// WiFi, NTP, heartbeat. Module DS3231 + AT24C32 tuỳ chọn (xem shared.h).
 // Chế độ cấu hình (portal) thay cho network task khi chưa có cấu hình hoặc giữ BOOT lúc boot.
 #include <Arduino.h>
 #include <Wire.h>
 
 #include "config_store.h"
-#include "ds3231.h"
 #include "net_task.h"
 #include "pins.h"
 #include "portal.h"
 #include "pump.h"
 #include "schedule.h"
+#include "schedule_store.h"
 #include "shared.h"
 
 static char s_schedBody[kScheduleBodyMax];  // static: không chiếm stack loopTask
 static Schedule s_schedule;
 static NetConfig s_cfg;
+
+// Mỗi module một dòng log, rồi một dòng chế độ lưu trữ.
+static void logModules(ModuleState ds, ModuleState at, bool clockValid, uint32_t rtcUtc) {
+    switch (ds) {
+        case ModuleState::Ok:
+            if (clockValid) {
+                Serial.printf("[main] DS3231: ok — đồng hồ hệ thống lấy từ DS3231 (utc=%lu)\n",
+                              (unsigned long)rtcUtc);
+            } else {
+                Serial.printf("[main] DS3231: ok nhưng giờ vô lý (utc=%lu) — chờ NTP / server\n",
+                              (unsigned long)rtcUtc);
+            }
+            break;
+        case ModuleState::LostPower:
+            Serial.println("[main] DS3231: lost_power — cờ OSF bật (pin CR2032?), giờ không tin "
+                           "được — chờ NTP / server");
+            break;
+        case ModuleState::Failed:
+            Serial.println("[main] DS3231: failed — có ACK nhưng đọc lỗi, bỏ dùng — chờ NTP / "
+                           "server");
+            break;
+        case ModuleState::Absent:
+            Serial.println("[main] DS3231: absent — không có module, chờ NTP / server (chưa có giờ "
+                           "thì không tưới)");
+            break;
+    }
+    switch (at) {
+        case ModuleState::Ok:
+            Serial.println("[main] AT24C32: ok");
+            break;
+        case ModuleState::Failed:
+            Serial.println("[main] AT24C32: failed — có ACK nhưng đọc/ghi header queue lỗi, bỏ "
+                           "dùng");
+            break;
+        case ModuleState::LostPower:  // không dùng cho AT24C32
+        case ModuleState::Absent:
+            Serial.println("[main] AT24C32: absent");
+            break;
+    }
+    Serial.println(at == ModuleState::Ok
+                       ? "[main] lưu trữ: AT24C32 (queue events, lastStop, lịch cache)"
+                       : "[main] lưu trữ: RAM (queue events, lastStop — mất khi reset) + NVS (lịch "
+                         "cache)");
+}
 
 void setup() {
     // 1. Bơm tắt trước mọi thứ, rồi Serial, lock, LED (active-LOW, tắt).
@@ -29,33 +74,37 @@ void setup() {
     const bool button = portal::bootButtonHeld();
     Serial.printf("[main] Ner0bit fw 0.1.0, nút BOOT: %s\n", button ? "giữ ⇒ setup" : "không");
 
-    // 3–4. I2C, queue, đồng hồ, lịch cache.
+    // 3. I2C, module DS3231 / AT24C32 (đều tuỳ chọn), đồng hồ hệ thống, storage.
     Wire.begin(I2C_SDA, I2C_SCL, I2C_FREQ);
-    uint32_t fetchDay = 0;
-    const bool hasCache = config::loadSchedule(s_schedBody, sizeof s_schedBody, fetchDay);
-    const bool cacheOk = hasCache && parseSchedule(s_schedBody, s_schedule);
-    bool rtcOk;
-    bool queueOk;
+    uint32_t rtcUtc = 0;
+    ModuleState ds;
+    ModuleState at;
+    bool clockValid;
     uint16_t queued;
     uint32_t lastStop;
     {
         SharedLock lock;
-        g_queue.begin();
+        clockBoot(rtcUtc);
+        storageBoot();
         g_sched.setLastStop(g_queue.lastStop());
-        rtcOk = ds3231::begin();
-        g_clockValid = rtcOk && !ds3231::lostPower();
-        if (cacheOk) g_sched.setSchedule(s_schedule, fetchDay);
         g_sched.setFetchOk(false);
-        queueOk = g_queue.available();
+        ds = g_ds3231;
+        at = g_at24c32;
+        clockValid = g_clockValid;
         queued = g_queue.count();
         lastStop = g_queue.lastStop();
     }
-    Serial.printf("[main] DS3231 %s, đồng hồ %s; queue %u events, lastStop %lu\n",
-                  rtcOk ? "OK" : "KHÔNG PHẢN HỒI", g_clockValid ? "hợp lệ" : "CHƯA HỢP LỆ (chờ NTP)",
-                  (unsigned)queued, (unsigned long)lastStop);
-    if (!queueOk) {
-        Serial.println("[main] lỗi: không đọc được header queue trên AT24C32 — queue tạm không dùng "
-                       "(events phiên này không lưu, lastStop coi như 0), không format");
+    logModules(ds, at, clockValid, rtcUtc);
+    Serial.printf("[main] queue %u events, lastStop %lu\n", (unsigned)queued,
+                  (unsigned long)lastStop);
+
+    // 4. Lịch cache (AT24C32 hoặc NVS theo chế độ storage).
+    uint32_t fetchDay = 0;
+    const bool hasCache = schedule_store::load(s_schedBody, sizeof s_schedBody, fetchDay);
+    const bool cacheOk = hasCache && parseSchedule(s_schedBody, s_schedule);
+    if (cacheOk) {
+        SharedLock lock;
+        g_sched.setSchedule(s_schedule, fetchDay);
     }
     Serial.printf("[main] lịch cache: %s\n",
                   cacheOk ? "đã nạp" : (hasCache ? "lỗi, bỏ qua" : "chưa có"));

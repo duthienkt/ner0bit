@@ -61,9 +61,9 @@ bool loadSchedule(char* body, size_t cap, uint32_t& fetchDay) {
     body[0] = '\0';
     Preferences p;
     if (!p.begin(kNs, true)) return false;
-    bool ok = p.isKey(kSched) && p.isKey(kFetchDay) && p.getString(kSched, body, cap) > 1;
+    bool ok = p.isKey(kSched) && p.getString(kSched, body, cap) > 1;
     if (ok) {
-        fetchDay = p.getUInt(kFetchDay, 0);
+        fetchDay = p.isKey(kFetchDay) ? p.getUInt(kFetchDay, 0) : 0;
     } else {
         body[0] = '\0';
     }
@@ -83,14 +83,16 @@ static bool sameString(Preferences& p, const char* key, const char* s) {
     return same;
 }
 
-void saveScheduleIfChanged(const char* body, uint32_t fetchDay) {
+void saveScheduleIfChanged(const char* body, uint32_t fetchDay, bool hasLine2) {
     if (!body) return;
     Preferences p;
     if (!p.begin(kNs, false)) return;
     // Ghi body trước fetchDay: mất điện giữa chừng thì body mới + ngày cũ ⇒ dòng 2 bị coi là
     // cũ (an toàn), không bao giờ body cũ + ngày mới (dòng 2 cũ bị áp cho hôm nay).
     if (!sameString(p, kSched, body)) p.putString(kSched, body);
-    if (!p.isKey(kFetchDay) || p.getUInt(kFetchDay, 0) != fetchDay) p.putUInt(kFetchDay, fetchDay);
+    if (hasLine2 && (!p.isKey(kFetchDay) || p.getUInt(kFetchDay, 0) != fetchDay)) {
+        p.putUInt(kFetchDay, fetchDay);
+    }
     p.end();
 }
 

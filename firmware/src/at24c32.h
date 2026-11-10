@@ -10,6 +10,9 @@ public:
     static constexpr uint16_t kSize = 4096;
     static constexpr uint16_t kPageSize = 32;
 
+    // true nếu chip trả ACK ở 0x57.
+    static bool present();
+
     // Đọc theo chunk ≤ 30 byte (vừa buffer Wire 32 byte trên mọi core).
     bool read(uint16_t addr, uint8_t* buf, uint16_t len) override;
     // Ghi tách theo biên page 32 byte; sau mỗi page chờ 5 ms rồi ACK-poll tới khi chip sẵn sàng.
