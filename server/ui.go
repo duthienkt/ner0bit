@@ -155,17 +155,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Error: fmt.Sprintf("Sai quá nhiều lần. Thử lại sau %d phút.", mins)})
 		return
 	}
-	if !s.passwordMatches(r.PostFormValue("password")) {
-		if !s.loginFailed(ip, now) {
-			// Map đầy toàn mục bị khoá: lần sai của nguồn chưa ghi nhận được tuần tự hoá toàn cục
-			// (tối đa ~1 lần/giây cho cả server). Đang có lần khác chờ ⇒ 429 ngay, không xếp hàng.
-			if !s.slowMu.TryLock() {
-				s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
-					Error: "Đang có quá nhiều lần đăng nhập sai. Thử lại sau."})
-				return
-			}
+	if s.cannotRecord(ip) {
+		// Map đầy toàn mục bị khoá (đang bị dò hàng loạt) và nguồn này chưa được ghi nhận: phải giành
+		// lượt toàn cục TRƯỚC khi kiểm tra mật khẩu — tối đa ~1 lần thử/giây cho cả server, và 429
+		// không lộ mật khẩu đúng hay sai.
+		if !s.slowMu.TryLock() {
+			log.Printf("UI: 429 cho %s (đang bị dò mật khẩu hàng loạt)", ip)
+			s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
+				Error: "Đang có quá nhiều lần đăng nhập sai. Thử lại sau ít giây."})
+			return
+		}
+		defer s.slowMu.Unlock()
+		if !s.passwordMatches(r.PostFormValue("password")) {
 			s.slowdown()
-			s.slowMu.Unlock()
+			log.Printf("UI: đăng nhập sai từ %s (không ghi nhận được, đã làm chậm)", ip)
+			s.renderPage(w, http.StatusUnauthorized, pageData{Mode: "login", Error: "Sai mật khẩu."})
+			return
+		}
+	} else if !s.passwordMatches(r.PostFormValue("password")) {
+		if !s.loginFailed(ip, now) {
+			s.slowdown() // map vừa đầy giữa chừng: hiếm, chỉ làm chậm
 		}
 		log.Printf("UI: đăng nhập sai từ %s", ip)
 		s.renderPage(w, http.StatusUnauthorized, pageData{Mode: "login", Error: "Sai mật khẩu."})
@@ -248,6 +257,16 @@ func (s *Server) loginFailed(ip string, now time.Time) bool {
 	}
 	f.count++
 	return true
+}
+
+// cannotRecord: nguồn chưa được ghi nhận và map đầy toàn mục đang bị khoá (không còn chỗ để đếm).
+func (s *Server) cannotRecord(ip string) bool {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	if _, ok := s.loginFails[ip]; ok {
+		return false
+	}
+	return len(s.loginFails) >= maxLoginIPs && s.oldestUnlockedLocked() == ""
 }
 
 // slowdown: trễ cố định cho lần đăng nhập sai không ghi nhận được (map đầy). Test thay bằng hàm rỗng.

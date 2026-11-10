@@ -700,8 +700,9 @@ func TestLoginUntrackedFailuresSerialized(t *testing.T) {
 	if rec := login(s, "sai", withRemote("192.0.2.61:1")); rec.Code != http.StatusTooManyRequests {
 		t.Errorf("lần sai song song: code %d, want 429", rec.Code)
 	}
-	if rec := login(s, testPassword, withRemote("192.0.2.62:1")); rec.Code != http.StatusSeeOther {
-		t.Errorf("đúng mật khẩu trong lúc có lần sai đang chờ: code %d, want 303", rec.Code)
+	// Không được lộ mật khẩu đúng/sai qua mã trả về: đang có lượt chờ ⇒ 429 cả khi mật khẩu đúng.
+	if rec := login(s, testPassword, withRemote("192.0.2.62:1")); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("đúng mật khẩu trong lúc có lượt đang chờ: code %d, want 429 (không lộ kết quả)", rec.Code)
 	}
 	close(release)
 	if code := <-done; code != http.StatusUnauthorized {
