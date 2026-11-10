@@ -157,7 +157,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.passwordMatches(r.PostFormValue("password")) {
 		if !s.loginFailed(ip, now) {
+			// Map đầy toàn mục bị khoá: lần sai của nguồn chưa ghi nhận được tuần tự hoá toàn cục
+			// (tối đa ~1 lần/giây cho cả server). Đang có lần khác chờ ⇒ 429 ngay, không xếp hàng.
+			if !s.slowMu.TryLock() {
+				s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
+					Error: "Đang có quá nhiều lần đăng nhập sai. Thử lại sau."})
+				return
+			}
 			s.slowdown()
+			s.slowMu.Unlock()
 		}
 		log.Printf("UI: đăng nhập sai từ %s", ip)
 		s.renderPage(w, http.StatusUnauthorized, pageData{Mode: "login", Error: "Sai mật khẩu."})

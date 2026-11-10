@@ -47,6 +47,7 @@ type Server struct {
 	loginMu       sync.Mutex
 	loginFails    map[string]*loginFailures // theo IP client
 	loginSlowdown func()                    // nil ⇒ ngủ 1 s (xem slowdown); test thay bằng hàm rỗng
+	slowMu        sync.Mutex                // tuần tự hoá lần sai không ghi nhận được (xem handleLogin)
 }
 
 type lastHeartbeat struct {

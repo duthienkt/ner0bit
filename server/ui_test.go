@@ -680,3 +680,31 @@ func TestLoginMapFullOfLockedStillAdmitsCorrectPassword(t *testing.T) {
 		t.Errorf("chủ nhà đúng mật khẩu khi map đầy: code %d, want 303", rec.Code)
 	}
 }
+
+// Map đầy: các lần sai của nguồn chưa ghi nhận bị tuần tự hoá toàn cục — đang có một lần sai chờ
+// trễ thì lần sai song song khác nhận 429 ngay (không né được bằng cách gửi song song).
+func TestLoginUntrackedFailuresSerialized(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	s.loginSlowdown = func() {}
+	for i := 0; i < maxLoginIPs; i++ {
+		for j := 0; j < maxLoginFailures; j++ {
+			login(s, "sai", withRemote(fmt.Sprintf("10.%d.%d.%d:1", i>>16&255, i>>8&255, i&255)))
+		}
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.loginSlowdown = func() { close(entered); <-release }
+	done := make(chan int)
+	go func() { done <- login(s, "sai", withRemote("192.0.2.60:1")).Code }()
+	<-entered
+	if rec := login(s, "sai", withRemote("192.0.2.61:1")); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("lần sai song song: code %d, want 429", rec.Code)
+	}
+	if rec := login(s, testPassword, withRemote("192.0.2.62:1")); rec.Code != http.StatusSeeOther {
+		t.Errorf("đúng mật khẩu trong lúc có lần sai đang chờ: code %d, want 303", rec.Code)
+	}
+	close(release)
+	if code := <-done; code != http.StatusUnauthorized {
+		t.Errorf("lần sai đầu: code %d, want 401", code)
+	}
+}
