@@ -251,35 +251,35 @@ func (srv *Server) deviceBody(now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	date := now.In(vietnam).Format(time.DateOnly)
-	if p.AutoEnabled {
-		es, err := srv.Store.autoDayEntries(date, now, p)
-		if err != nil {
-			return "", err
-		}
-		return daily + "\n" + renderLine(es), nil
-	}
-	man, err := srv.Store.manualEntries(date)
+	ss, prov, err := srv.Store.daySessions(now.In(vietnam).Format(time.DateOnly), now, p)
 	if err != nil {
 		return "", err
 	}
-	if len(man) == 0 {
-		return daily, nil
-	}
-	return daily + "\n" + renderLine(append(parseLineEntries(daily), man...)), nil
+	return bodyOf(daily, p.AutoEnabled, ss, prov), nil
 }
 
-// autoDayEntries là dòng 2 của ngày date khi bật tự động (xem deviceBody).
-func (s *Store) autoDayEntries(date string, now time.Time, p Params) ([]entry, error) {
-	ss, prov, err := s.dayPlan(date, now, p)
-	if err != nil {
-		return nil, err
+// daySessions đọc các phiên của ngày date; khi bật tự động kèm bản tạm của các lần chưa chốt
+// (dayPlan), khi tắt thì không có bản tạm.
+func (s *Store) daySessions(date string, now time.Time, p Params) ([]Session, []Decision, error) {
+	if p.AutoEnabled {
+		return s.dayPlan(date, now, p)
 	}
-	var es []entry
+	ss, err := s.Sessions(date)
+	return ss, nil, err
+}
+
+// lineEntries là các mốc thiết bị sẽ tưới trong ngày (xem deviceBody); hasManual cho biết có
+// phiên manual còn hiệu lực.
+func lineEntries(daily string, auto bool, ss []Session, prov []Decision) (es []entry, hasManual bool) {
+	if !auto {
+		es = parseLineEntries(daily)
+	}
 	for _, x := range ss {
 		switch {
-		case x.Source == sessionAuto && x.State == stateFinal && x.RunS > 0,
-			x.Source == sessionManual && x.State != stateDeleted:
+		case x.Source == sessionManual && x.State != stateDeleted:
+			es = append(es, entry{x.StartS, x.RunS})
+			hasManual = true
+		case auto && x.Source == sessionAuto && x.State == stateFinal && x.RunS > 0:
 			es = append(es, entry{x.StartS, x.RunS})
 		}
 	}
@@ -288,7 +288,16 @@ func (s *Store) autoDayEntries(date string, now time.Time, p Params) ([]entry, e
 			es = append(es, entry{d.Slot.StartS, d.RunS})
 		}
 	}
-	return es, nil
+	return es, hasManual
+}
+
+// bodyOf ghép body gửi ESP từ lịch dự phòng và các phiên của hôm nay.
+func bodyOf(daily string, auto bool, ss []Session, prov []Decision) string {
+	es, hasManual := lineEntries(daily, auto, ss, prov)
+	if !auto && !hasManual {
+		return daily
+	}
+	return daily + "\n" + renderLine(es)
 }
 
 // ---- HTTP ----

@@ -8,26 +8,27 @@ import (
 
 // Ledger là sổ phút miễn của một ngày Vrain (spec §4.3).
 type Ledger struct {
-	VDay       string
-	CarryInS   float64 // phút miễn dư từ ngày trước, chỉ dùng cho các lần buổi sáng
-	UsedCarryS float64
-	UsedRainS  float64
-	UsedSunS   float64
+	VDay       string  `json:"vday"`
+	CarryInS   float64 `json:"carry_in_s"` // phút miễn dư từ ngày trước, chỉ dùng cho các lần buổi sáng
+	UsedCarryS float64 `json:"used_carry_s"`
+	UsedRainS  float64 `json:"used_rain_s"`
+	UsedSunS   float64 `json:"used_sun_s"`
 }
 
 // Decision là kết quả chốt một lần tưới. Các trường số giữ đầu vào/phân rã để UI giải thích.
+// Thẻ JSON dùng cho cả inputs_json (bảng blocks) lẫn API /api/day.
 type Decision struct {
-	Slot        Slot
-	RunS        int
-	SumMM       float64
-	RainCreditS float64 // M(t)
-	AvailCarryS float64
-	AvailRainS  float64
-	AvailSunS   float64
-	SunS        float64
-	ETMM        float64  // bốc hơi ngày (mm) của lần buổi chiều; 0 nếu không tính
-	Notes       []string // cảnh báo lúc chốt (Vrain trễ, METAR thiếu…); scheduler điền
-	Reason      string
+	Slot        Slot     `json:"slot"`
+	RunS        int      `json:"run_s"`
+	SumMM       float64  `json:"sum_mm"`
+	RainCreditS float64  `json:"rain_credit_s"` // M(t)
+	AvailCarryS float64  `json:"avail_carry_s"`
+	AvailRainS  float64  `json:"avail_rain_s"`
+	AvailSunS   float64  `json:"avail_sun_s"`
+	SunS        float64  `json:"sun_s"`
+	ETMM        float64  `json:"et_mm"`           // bốc hơi ngày (mm) của lần buổi chiều; 0 nếu không tính
+	Notes       []string `json:"notes,omitempty"` // cảnh báo lúc chốt (Vrain trễ, METAR thiếu…); scheduler điền
+	Reason      string   `json:"reason"`
 }
 
 // rainCreditS là số giây được miễn do mưa tích luỹ sumMM: clamp((sum − lo)·per_mm, 0, quota).

@@ -178,14 +178,6 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
 .ticks span:first-child { transform: none; }
 .ticks span:last-child { transform: translateX(-100%); }
 .ribbon-has-tag { padding-top: 24px; }
-.today-list { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px 8px; }
-.chip {
-  display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px;
-  border-radius: 999px; background: var(--water-soft); font-weight: 600;
-}
-.chip small { font-weight: 400; color: var(--ink-soft); }
-.chip.skip { background: var(--amber-soft); }
-.chip.done { opacity: .6; }
 .pending { margin-top: 14px; padding: 10px 14px; border-left: 3px solid var(--water); background: var(--water-soft); border-radius: 0 var(--radius-s) var(--radius-s) 0; }
 .pending.wait { border-color: var(--amber); background: var(--amber-soft); }
 details.raw { margin-top: 12px; color: var(--ink-soft); }
@@ -221,29 +213,61 @@ details.raw pre {
 .note.bad { color: var(--alert); }
 .entries-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 
-/* ---- Lịch riêng theo ngày ---- */
-.day-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
-.day-tools .spacer { flex: 1; }
-.day {
-  margin-top: 14px; padding: 14px 16px 10px;
-  border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface);
-}
-.day.is-today { border-color: var(--water); box-shadow: inset 4px 0 0 var(--water); }
-.day.is-past { opacity: .7; }
-.day-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.day-name { font-weight: 700; }
-.tag { font-size: 13px; padding: 1px 8px; border-radius: 999px; background: var(--water-soft); color: var(--water-ink); font-weight: 600; }
-.tag.past { background: var(--paper); color: var(--ink-soft); }
-.day-head .icon-btn { margin-left: auto; }
-.seg { display: inline-flex; margin: 12px 0 6px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-.seg label { position: relative; }
-.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.seg span { display: block; padding: 7px 14px; font-size: 15px; }
-.seg input:checked + span { background: var(--ink); color: var(--paper); font-weight: 600; }
-.seg input:focus-visible + span { outline: 3px solid var(--water); outline-offset: -3px; }
-.off-note { color: var(--ink-soft); padding: 6px 0 8px; }
+/* ---- Phiên tưới của một ngày ---- */
+.tag { font-size: 13px; padding: 1px 8px; border-radius: 999px; background: var(--water-soft); color: var(--water-ink); font-weight: 600; font-style: normal; white-space: nowrap; }
+.tag.manual { background: var(--leaf-soft); color: var(--leaf); }
+.tag.daily, .tag.past { background: var(--paper); color: var(--ink-soft); border: 1px solid var(--line); }
+.tag.warn { background: var(--amber-soft); color: var(--amber); }
+.tag.bad { background: var(--alert-soft); color: var(--alert); }
+.day-sum { color: var(--ink-soft); margin: 0 0 6px; }
+.sessions { margin-top: 10px; border-top: 1px solid var(--line); }
+.sess { display: grid; grid-template-columns: 64px 92px 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.sess-time { font-size: 18px; font-weight: 700; }
+.sess-run { font-weight: 600; }
+.sess-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+.sess-reason { grid-column: 2 / -1; font-size: 14px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.sess.prov { font-style: italic; }
+.sess.prov .sess-time, .sess.prov .sess-run { font-weight: 500; color: var(--ink-soft); }
+.sess.off .sess-time, .sess.off .sess-run { text-decoration: line-through; color: var(--ink-soft); }
+.sess .btn-quiet { min-height: 32px; }
+.warns { margin-top: 10px; }
+.warns p { font-size: 14px; color: var(--amber); padding: 2px 0; }
 .empty { color: var(--ink-soft); padding: 8px 0; }
+.day-name { font-weight: 700; }
+.slots-field { margin-top: 18px; }
 .load-error { margin-bottom: 16px; padding: 10px 14px; border-radius: var(--radius-s); background: var(--alert-soft); color: var(--alert); }
+.day-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.add-sess { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; margin-top: 18px; }
+.add-sess .field { flex: 0 0 auto; }
+.add-sess .field.grow { flex: 1 1 180px; }
+details.wx { margin-top: 14px; }
+details.wx summary { cursor: pointer; min-height: 32px; color: var(--ink-soft); }
+.wx-body { margin-top: 6px; font-size: 15px; }
+.wx-body p { padding: 2px 0; }
+.wx-body .rain-h { display: grid; grid-template-columns: 120px 1fr; gap: 0 12px; }
+
+/* ---- Thiết lập tự động ---- */
+.field label, .field .label { display: block; font-size: 13px; color: var(--ink-soft); margin-bottom: 4px; }
+.field input { width: 100%; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 18px; margin-top: 18px; }
+input[type=text], select {
+  min-height: 44px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-s);
+  background: var(--surface);
+}
+.switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 650; font-size: 18px; cursor: pointer; }
+.switch input { width: 22px; height: 22px; accent-color: var(--water); }
+.slot-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.slot-row input[type=time] { font-size: 19px; font-weight: 650; padding: 4px 8px; }
+.derived { margin-top: 14px; color: var(--ink-soft); }
+.derived b { color: var(--ink); }
+.callout {
+  margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-s);
+  border-left: 3px solid var(--amber); background: var(--amber-soft);
+}
+.callout .btn { margin-top: 10px; }
+.form-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+.form-foot p { flex: 1 1 200px; font-size: 14px; }
 
 /* ---- Thanh lưu ---- */
 .savebar {
@@ -286,7 +310,9 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   .ev { grid-template-columns: 72px 1fr; }
   .ev-text { grid-column: 1 / -1; }
   .status { padding: 18px 16px 16px; margin-left: -4px; margin-right: -4px; }
-  .day { padding: 12px 10px 8px; }
+  .sess { grid-template-columns: 56px 1fr auto; }
+  .sess-meta { grid-column: 2 / 3; }
+  .sess-reason { grid-column: 1 / -1; }
   .entry input[type=time] { font-size: 18px; }
   .dur input { width: 60px; }
 }
@@ -339,34 +365,51 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     <h2 class="day-title" id="day-title">Hôm nay</h2>
     <p class="day-mode" id="day-mode"></p>
     <div id="ribbon"></div>
-    <div class="today-list" id="today-list"></div>
+    <p class="day-sum" id="today-sum"></p>
+    <div class="sessions" id="today-sessions"></div>
+    <div class="warns" id="today-warns"></div>
     <p class="pending" id="pending"></p>
     <details class="raw"><summary>Nội dung server trả cho thiết bị hôm nay</summary><pre id="raw-body"></pre></details>
+    <details class="wx" id="wx"><summary>Mưa và nhiệt độ 48 giờ qua</summary><div class="wx-body" id="wx-body"></div></details>
     <div class="trial">
       <label>Tưới thử sau <input type="number" id="trial-min" min="1" max="600" step="1" value="7" inputmode="numeric"> phút</label>
       <button class="btn" type="button" id="trial-btn">Tưới thử</button>
-      <p class="trial-note">Thêm một mốc 5 phút vào lịch riêng hôm nay rồi lưu ngay. Thiết bị nhận lịch ở heartbeat kế tiếp (tối đa 5 phút), nên đặt từ 7 phút trở lên.</p>
+      <p class="trial-note">Thêm một phiên bơm thử 5 phút. Thiết bị nhận lịch ở heartbeat kế tiếp (tối đa 5 phút), nên đặt từ 7 phút trở lên.</p>
     </div>
+  </section>
+
+  <section aria-labelledby="cal-h">
+    <div class="sec-head"><h2 id="cal-h">Lịch tưới</h2></div>
+    <p class="sec-lede">Các lần tưới của từng ngày. Phiên tự động do server chốt lúc :09 trước giờ tưới; phần in nghiêng là bản tạm, còn đổi theo mưa. Thêm phiên bơm thử chỉ cộng thêm, không đụng lần tự động.</p>
+    <div class="day-tools">
+      <button class="btn btn-line" type="button" id="cal-prev" aria-label="Ngày trước">‹</button>
+      <input type="date" id="cal-date" aria-label="Chọn ngày">
+      <button class="btn btn-line" type="button" id="cal-next" aria-label="Ngày sau">›</button>
+      <button class="btn-quiet" type="button" id="cal-today">Hôm nay</button>
+    </div>
+    <p class="day-name" id="cal-name"></p>
+    <p class="day-sum" id="cal-sum"></p>
+    <div class="sessions" id="cal-sessions"></div>
+    <div class="warns" id="cal-warns"></div>
+    <div class="add-sess" id="cal-add">
+      <div class="field"><label for="add-time">Giờ</label><input type="time" id="add-time" value="09:00" required></div>
+      <div class="field"><label for="add-min">Số phút</label><input type="number" id="add-min" min="1" max="30" step="1" value="5" inputmode="numeric"></div>
+      <div class="field grow"><label for="add-note">Ghi chú</label><input type="text" id="add-note" maxlength="200" placeholder="ví dụ: bơm thử"></div>
+      <button class="btn" type="button" id="add-btn">Thêm phiên bơm thử</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="auto-h">
+    <div class="sec-head"><h2 id="auto-h">Thiết lập tự động</h2></div>
+    <p class="sec-lede">Server tính số phút mỗi lần từ mưa đo ở trạm Vrain Đỗ Xuân Hợp (cộng dồn từ 19h hôm trước) và nắng ước từ METAR Tân Sơn Nhất. Mưa dưới ngưỡng thấp không giảm; từ ngưỡng cao trở lên thì không tưới.</p>
+    <div id="settings"></div>
   </section>
 
   <section aria-labelledby="daily-h">
-    <div class="sec-head"><h2 id="daily-h">Lịch hằng ngày</h2></div>
-    <p class="sec-lede">Lặp lại mỗi ngày, trừ những ngày có lịch riêng bên dưới. Mỗi mốc: giờ bắt đầu và số phút tưới.</p>
+    <div class="sec-head"><h2 id="daily-h">Lịch dự phòng</h2></div>
+    <p class="sec-lede">Dòng 1 gửi thiết bị, lặp mỗi ngày. Thiết bị tưới theo lịch này khi tắt tự động (cộng các phiên bơm thử), và giữ nó khi không lấy được lịch mới. Server không bao giờ tự sửa lịch này.</p>
     <div id="load-error"></div>
     <div id="daily"></div>
-  </section>
-
-  <section aria-labelledby="days-h">
-    <div class="sec-head"><h2 id="days-h">Lịch riêng theo ngày</h2></div>
-    <p class="sec-lede">Ngày có lịch riêng sẽ bỏ hẳn lịch hằng ngày: tưới theo các mốc riêng, hoặc không tưới.</p>
-    <div class="day-tools">
-      <button class="btn btn-line" type="button" id="add-today">Hôm nay</button>
-      <input type="date" id="new-date" aria-label="Chọn ngày">
-      <button class="btn btn-line" type="button" id="add-day">Thêm ngày</button>
-      <span class="spacer"></span>
-      <button class="btn-quiet" type="button" id="prune">Xoá các ngày đã qua</button>
-    </div>
-    <div id="days"></div>
   </section>
 
   <section aria-labelledby="ev-h">
@@ -376,8 +419,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   </section>
 
   <footer>Trạng thái và hoạt động tự làm mới mỗi 15 giây. Giờ hiển thị theo giờ Việt Nam.</footer>
-  <div class="savebar" id="savebar" role="region" aria-label="Lưu lịch">
-    <p id="save-msg">Có thay đổi chưa lưu</p>
+  <div class="savebar" id="savebar" role="region" aria-label="Lưu lịch dự phòng">
+    <p id="save-msg">Lịch dự phòng có thay đổi chưa lưu</p>
     <button class="btn btn-line" type="button" id="revert">Bỏ thay đổi</button>
     <button class="btn" type="button" id="save">Lưu lịch</button>
   </div>
@@ -392,7 +435,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   var VN_OFFSET = 7 * 3600 * 1000;
   var WEEKDAYS = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
   var EVENT_TYPE = { start: 'Bật bơm', stop: 'Tắt bơm', skipped: 'Bỏ mốc' };
-  var EVENT_SOURCE = { normal: 'lịch hằng ngày', today: 'lịch riêng', failsafe: 'lịch dự phòng (lần lấy lịch gần nhất bị lỗi)' };
+  var EVENT_SOURCE = { normal: 'lịch dự phòng', today: 'lịch hôm nay', failsafe: 'lịch lưu trên thiết bị (lần lấy lịch gần nhất bị lỗi)' };
   var EVENT_REASON = {
     done: 'tưới đủ thời lượng',
     capped: 'bị cắt ở giới hạn 30 phút',
@@ -406,16 +449,29 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     lost_power: ['Từng mất nguồn pin', 'warn'],
     failed: ['Lỗi, đã ngừng dùng', 'bad']
   };
+  var KIND = { auto: ['Tự động', ''], manual: ['Bơm thử', 'manual'], daily: ['Dự phòng', 'daily'] };
+  var STATE = {
+    final: ['Đã chốt', ''], skipped: ['Bỏ', 'warn'], cancelled: ['Đã huỷ', 'bad'],
+    provisional: ['Tạm tính', 'daily'], daily: ['Theo lịch', 'daily'], planned: ['Đã thêm', 'manual'],
+    unsent: ['Không gửi (tự động đang tắt)', 'daily']
+  };
+  var PHASE = { am: 'Sáng', pm: 'Chiều' };
 
   var skew = 0;            // giờ server − giờ máy (ms)
   var state = null;        // /api/state
+  var settings = null;     // /api/settings
   var events = [];
   var eventLimit = 100;
-  var model = null;        // {daily: [{sec, dur}], days: [{date, off, entries}]}
-  var savedJSON = null;    // lịch đã lưu (dạng chuẩn) — so để biết có thay đổi
-  var savedAt = 0;         // lúc lưu lịch từ trang này (giờ server, ms)
+  var model = null;        // lịch dự phòng đang sửa: {daily: [{sec, dur}]}
+  var savedJSON = null;    // lịch dự phòng đã lưu (dạng chuẩn) — so để biết có thay đổi
+  var savedAt = 0;         // lúc đổi lịch từ trang này (giờ server, ms)
   var editors = [];        // hàm cập nhật cảnh báo của từng bộ sửa mốc
   var saving = false;
+  var form = null;         // tham số tự động đang sửa
+  var formSaved = '';      // JSON của tham số đã lưu
+  var settingsJSON = '';   // /api/settings lần trước, để biết khi nào vẽ lại form
+  var calDate = '';        // ngày đang xem ở "Lịch tưới"
+  var calDay = null;       // /api/day của calDate
 
   function $(id) { return document.getElementById(id); }
 
@@ -484,6 +540,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var m = Math.floor(sec / 60), s = sec % 60;
     return s ? m + ' phút ' + s + ' giây' : m + ' phút';
   }
+  function mins(sec) { return Math.round(sec / 60); }
+  function mm(x) { return (Math.round(x * 10) / 10).toString().replace('.', ',') + ' mm'; }
   function ago(ms) {
     var s = Math.max(0, Math.round((nowMs() - ms) / 1000));
     if (s < 60) return 'vừa xong';
@@ -516,21 +574,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       return e.dur === DEF_DUR ? String(e.sec) : e.sec + ':' + e.dur;
     }).join(',');
   }
-  function fromSchedule(s) {
-    var days = Object.keys(s.days || {}).sort().map(function (date) {
-      var line = s.days[date];
-      return { date: date, off: line === '', entries: parseLine(line).sort(bySec) };
-    });
-    return { daily: parseLine(s.daily).sort(bySec), days: days };
-  }
-  function toSchedule(m) {
-    var days = {};
-    m.days.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (d) {
-      days[d.date] = d.off ? '' : lineOf(d.entries);
-    });
-    return { daily: lineOf(m.daily), days: days };
-  }
-  function canon(m) { return JSON.stringify(toSchedule(m)); }
+  function canon(m) { return JSON.stringify({ daily: lineOf(m.daily) }); }
   function isDirty() { return model !== null && canon(model) !== savedJSON; }
 
   // Mô phỏng scheduler của thiết bị trong một ngày: mốc nào bị cắt / bị bỏ.
@@ -564,22 +608,9 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   }
   function validate(m) {
     var errs = [];
-    function checkList(entries, where) {
-      if (entries.length > MAX_ENTRIES) errs.push(where + ': tối đa ' + MAX_ENTRIES + ' mốc, đang có ' + entries.length + '.');
-      if (entries.some(entryErrors)) errs.push(where + ': có mốc chưa nhập đủ giờ hoặc số phút.');
-    }
-    if (!m.daily.length) errs.push('Lịch hằng ngày cần ít nhất 1 mốc.');
-    checkList(m.daily, 'Lịch hằng ngày');
-    var seen = {};
-    m.days.forEach(function (d) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) { errs.push('Có ngày chưa chọn.'); return; }
-      if (seen[d.date]) errs.push('Ngày ' + dayLabel(d.date) + ' bị trùng.');
-      seen[d.date] = true;
-      if (!d.off) {
-        if (!d.entries.length) errs.push(dayLabel(d.date) + ': chưa có mốc nào (chọn "Không tưới" nếu muốn nghỉ).');
-        checkList(d.entries, dayLabel(d.date));
-      }
-    });
+    if (!m.daily.length) errs.push('Lịch dự phòng cần ít nhất 1 mốc.');
+    if (m.daily.length > MAX_ENTRIES) errs.push('Lịch dự phòng: tối đa ' + MAX_ENTRIES + ' mốc, đang có ' + m.daily.length + '.');
+    if (m.daily.some(entryErrors)) errs.push('Lịch dự phòng: có mốc chưa nhập đủ giờ hoặc số phút.');
     return errs;
   }
 
@@ -651,77 +682,13 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     updateSaveBar();
   }
 
-  // ---- Vẽ lịch ----
+  // ---- Lịch dự phòng ----
   function renderSchedule() {
     editors = [];
     var daily = $('daily');
     daily.textContent = '';
-    var days = $('days');
-    days.textContent = '';
     if (!model) return;
     daily.appendChild(entryEditor(model.daily));
-
-    var today = todayStr();
-    if (!model.days.length) {
-      days.appendChild(h('p', { class: 'empty', text: 'Chưa có ngày nào có lịch riêng. Mọi ngày đang tưới theo lịch hằng ngày.' }));
-    }
-    model.days.forEach(function (day) {
-      var name = h('span', { class: 'day-name' });
-      var tag = h('span', { class: 'tag' });
-      var box = h('div', { class: 'day' });
-      function label() {
-        name.textContent = dayLabel(day.date);
-        var isToday = day.date === today, isPast = day.date < today;
-        tag.textContent = isToday ? 'Hôm nay' : isPast ? 'Đã qua' : day.date === addDays(today, 1) ? 'Ngày mai' : '';
-        tag.className = 'tag' + (isPast ? ' past' : '');
-        tag.hidden = !tag.textContent;
-        box.className = 'day' + (isToday ? ' is-today' : '') + (isPast ? ' is-past' : '');
-      }
-      var dateIn = h('input', { type: 'date', 'aria-label': 'Ngày', required: true });
-      dateIn.value = day.date;
-      dateIn.addEventListener('change', function () { day.date = dateIn.value; label(); changed(); });
-      var del = h('button', {
-        type: 'button', class: 'icon-btn', 'aria-label': 'Xoá lịch riêng của ngày này',
-        onclick: function () { model.days.splice(model.days.indexOf(day), 1); renderSchedule(); changed(); }
-      }, '×');
-      var group = 'mode-' + Math.random().toString(36).slice(2);
-      function opt(off, text) {
-        var r = h('input', { type: 'radio', name: group });
-        r.checked = day.off === off;
-        r.addEventListener('change', function () {
-          day.off = off;
-          if (!off && !day.entries.length) day.entries.push.apply(day.entries, copyEntries(model.daily));
-          renderSchedule(); changed();
-        });
-        return h('label', null, r, h('span', { text: text }));
-      }
-      box.appendChild(h('div', { class: 'day-head' }, dateIn, name, tag, del));
-      box.appendChild(h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Cách tưới ngày này' },
-        opt(false, 'Tưới theo mốc riêng'), opt(true, 'Không tưới')));
-      if (day.off) box.appendChild(h('p', { class: 'off-note', text: 'Ngày này bơm không chạy theo lịch nào.' }));
-      else box.appendChild(entryEditor(day.entries));
-      label();
-      days.appendChild(box);
-    });
-    $('prune').hidden = !model.days.some(function (d) { return d.date < today; });
-  }
-
-  function copyEntries(list) {
-    return list.map(function (e) { return { sec: e.sec, dur: e.dur }; });
-  }
-  function findDay(date) {
-    for (var i = 0; i < model.days.length; i++) if (model.days[i].date === date) return model.days[i];
-    return null;
-  }
-  function ensureDay(date) {
-    var d = findDay(date);
-    if (!d) {
-      // Lịch riêng thay hẳn lịch hằng ngày ⇒ khởi đầu bằng bản sao để không mất các mốc thường.
-      d = { date: date, off: false, entries: copyEntries(model.daily) };
-      model.days.push(d);
-      model.days.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    }
-    return d;
   }
 
   function updateSaveBar() {
@@ -731,7 +698,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (!dirty) return;
     var errs = validate(model);
     $('save').disabled = saving || errs.length > 0;
-    msg.textContent = errs.length ? errs[0] : 'Có thay đổi chưa lưu';
+    msg.textContent = errs.length ? errs[0] : 'Lịch dự phòng có thay đổi chưa lưu';
     msg.className = errs.length ? 'bad' : '';
   }
 
@@ -745,6 +712,23 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       return r;
     });
   }
+  // send gửi JSON (hoặc không body) rồi trả {ok, data}; lỗi mạng ⇒ toast.
+  function send(method, url, body) {
+    var opts = { method: method };
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    return api(url, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) toast(data.error || ('Lỗi ' + r.status), true);
+        return { ok: r.ok, data: data };
+      });
+    }).catch(function (e) {
+      if (e.message !== '401') toast('Không kết nối được server. Chưa lưu được.', true);
+      return { ok: false, data: {} };
+    });
+  }
 
   var toastTimer = 0;
   function toast(text, isError) {
@@ -756,40 +740,29 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   }
 
   function setSaved(sched) {
-    model = fromSchedule(sched);
+    model = { daily: parseLine(sched.daily).sort(bySec) };
     savedJSON = canon(model);
     renderSchedule();
     updateSaveBar();
   }
 
-  function save(successText) {
+  function save() {
     var errs = validate(model);
-    if (errs.length) { toast(errs[0], true); return Promise.resolve(false); }
+    if (errs.length) { toast(errs[0], true); return; }
     saving = true;
     updateSaveBar();
     $('save').textContent = 'Đang lưu…';
-    return api('/api/schedule', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(toSchedule(model))
-    }).then(function (r) {
-      return r.json().then(function (data) {
-        if (!r.ok) { toast(data.error || ('Lỗi ' + r.status), true); return false; }
-        savedAt = nowMs();
-        setSaved(data);
-        $('load-error').textContent = '';
-        toast(successText || 'Đã lưu lịch. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
-        refresh();
-        return true;
-      });
-    }).catch(function (e) {
-      if (e.message !== '401') toast('Không kết nối được server. Lịch chưa được lưu.', true);
-      return false;
-    }).then(function (ok) {
+    send('PUT', '/api/schedule', { daily: lineOf(model.daily) }).then(function (res) {
       saving = false;
       $('save').textContent = 'Lưu lịch';
+      if (res.ok) {
+        savedAt = nowMs();
+        setSaved(res.data);
+        $('load-error').textContent = '';
+        toast('Đã lưu lịch dự phòng. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
+        refresh();
+      }
       updateSaveBar();
-      return ok;
     });
   }
 
@@ -851,7 +824,104 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (hb.id) facts.appendChild(fact('Mã thiết bị', String(hb.id)));
   }
 
-  // ---- Hôm nay: dải 24 giờ ----
+  // ---- Lịch tưới của một ngày (/api/day) ----
+  function autoOn() { return !!(settings && settings.params.auto_enabled); }
+
+  // dayRows gộp phiên đã lưu, bản tạm và (khi tắt tự động) các mốc dự phòng thành một danh sách.
+  function dayRows(day) {
+    var rows = [], today = todayStr(), auto = autoOn();
+    day.sessions.forEach(function (s) {
+      var st = s.state;
+      if (s.source === 'manual') st = 'planned';
+      else if (!auto && st === 'final' && day.date >= today) st = 'unsent';
+      rows.push({ sec: s.start_s, run: s.run_s, kind: s.source, state: st, raw: s.state, id: s.id,
+        text: s.source === 'manual' ? s.note : s.reason });
+    });
+    day.provisional.forEach(function (d) {
+      rows.push({ sec: d.slot.start_s, run: d.run_s, kind: 'auto', state: 'provisional', text: d.reason });
+    });
+    if (!auto && day.date >= today && state && state.schedule) {
+      parseLine(state.schedule.daily).forEach(function (e) {
+        rows.push({ sec: e.sec, run: e.dur, kind: 'daily', state: 'daily', text: '' });
+      });
+    }
+    return rows.sort(function (a, b) { return a.sec - b.sec; });
+  }
+
+  function tag(map, key) {
+    var v = map[key] || [key, 'warn'];
+    return h('span', { class: 'tag' + (v[1] ? ' ' + v[1] : ''), text: v[0] });
+  }
+
+  function renderSessions(box, day, editable) {
+    box.textContent = '';
+    var rows = dayRows(day);
+    if (!rows.length) {
+      box.appendChild(h('p', { class: 'empty', text: 'Không có lần tưới nào.' }));
+      return;
+    }
+    rows.forEach(function (r) {
+      var off = r.state === 'skipped' || r.state === 'cancelled' || r.state === 'unsent' || r.run === 0;
+      var act = null;
+      if (editable && r.kind === 'auto' && r.raw === 'final') {
+        act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { cancelSession(r); } }, 'Huỷ');
+      } else if (editable && r.kind === 'manual') {
+        act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { deleteSession(r); } }, 'Xoá');
+      }
+      box.appendChild(h('div', { class: 'sess' + (r.state === 'provisional' ? ' prov' : '') + (off ? ' off' : '') },
+        h('span', { class: 'sess-time', text: hm(r.sec) }),
+        h('span', { class: 'sess-run', text: r.run ? fmtDur(r.run) : 'không tưới' }),
+        h('span', { class: 'sess-meta' }, tag(KIND, r.kind), tag(STATE, r.state)),
+        act || h('span'),
+        r.text ? h('p', { class: 'sess-reason', text: r.text }) : null));
+    });
+  }
+
+  function renderWarns(box, day) {
+    box.textContent = '';
+    day.warnings.forEach(function (w) { box.appendChild(h('p', { text: '⚠ ' + w })); });
+  }
+
+  function sumText(day) {
+    var parts = [];
+    parts.push(day.sum_mm === null ? 'Chưa có số liệu mưa của ngày này' : 'Mưa từ 19h hôm trước: ' + mm(day.sum_mm));
+    var l = day.ledger;
+    if (l.carry_in_s > 0) parts.push('chuyển sang từ hôm trước ' + mins(l.carry_in_s) + ' phút miễn (đã dùng ' + mins(l.used_carry_s) + ')');
+    if (l.used_rain_s > 0) parts.push('đã miễn do mưa ' + mins(l.used_rain_s) + ' phút');
+    if (l.used_sun_s > 0) parts.push('do trời râm ' + mins(l.used_sun_s) + ' phút');
+    return parts.join('; ') + '.';
+  }
+
+  function cancelSession(r) {
+    if (!confirm('Huỷ lần tưới tự động ' + hm(r.sec) + '? Sổ phút miễn vẫn tính như đã tưới.')) return;
+    send('POST', '/api/sessions/' + r.id + '/cancel').then(function (res) {
+      if (!res.ok) return;
+      savedAt = nowMs();
+      toast('Đã huỷ lần ' + hm(r.sec) + '. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
+      refresh();
+    });
+  }
+  function deleteSession(r) {
+    if (!confirm('Xoá phiên bơm thử ' + hm(r.sec) + '?')) return;
+    send('DELETE', '/api/sessions/' + r.id).then(function (res) {
+      if (!res.ok) return;
+      savedAt = nowMs();
+      toast('Đã xoá phiên ' + hm(r.sec) + '.');
+      refresh();
+    });
+  }
+  function addSession(date, sec, run, note, okText) {
+    return send('POST', '/api/sessions', { date: date, start_s: sec, run_s: run, note: note }).then(function (res) {
+      if (!res.ok) return false;
+      savedAt = nowMs();
+      var w = res.data.warnings || [];
+      toast(okText + (w.length ? ' Lưu ý: ' + w.join(' ') : ''), w.length > 0);
+      refresh();
+      return true;
+    });
+  }
+
+  // ---- Hôm nay ----
   function pct(sec) { return (Math.max(0, Math.min(DAY, sec)) / DAY * 100) + '%'; }
   function block(cls, start, end, title) {
     var b = h('span', { class: 'win ' + cls, title: title });
@@ -878,21 +948,25 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var today = state.today;
     var nowSec = vn(nowMs()).sec;
     $('day-title').textContent = 'Hôm nay, ' + dayLabel(today);
-    var ribbon = $('ribbon'), list = $('today-list'), mode = $('day-mode'), raw = $('raw-body'), pend = $('pending');
+    var ribbon = $('ribbon'), mode = $('day-mode'), raw = $('raw-body'), pend = $('pending');
     ribbon.textContent = '';
-    list.textContent = '';
+    if (state.day) {
+      $('today-sum').textContent = sumText(state.day);
+      renderSessions($('today-sessions'), state.day, true);
+      renderWarns($('today-warns'), state.day);
+    }
     if (state.today_body === null || state.today_body === undefined) {
-      mode.textContent = 'Lịch trên server đang lỗi: ' + (state.schedule_error || 'không rõ') + '. Thiết bị giữ lịch cũ cho tới khi lưu lịch hợp lệ.';
+      mode.textContent = 'Lịch trên server đang lỗi: ' + (state.schedule_error || 'không rõ') + '. Thiết bị giữ lịch cũ cho tới khi lưu lịch dự phòng hợp lệ.';
       raw.textContent = '(server trả lỗi 503)';
       pend.hidden = true;
       return;
     }
     var lines = state.today_body.split('\n');
     var entries;
-    if (lines.length > 1 && lines[1] === '') { mode.textContent = 'Hôm nay không tưới (lịch riêng).'; entries = []; }
-    else if (lines.length > 1) { mode.textContent = 'Hôm nay tưới theo lịch riêng.'; entries = parseLine(lines[1]); }
-    else { mode.textContent = 'Hôm nay tưới theo lịch hằng ngày.'; entries = parseLine(lines[0]); }
-    entries.sort(bySec);
+    if (autoOn()) mode.textContent = lines[1] === '' ? 'Lịch tự động: hôm nay không tưới.' : 'Lịch tự động đang bật: số phút mỗi lần tính theo mưa và nắng.';
+    else if (lines.length > 1) mode.textContent = 'Tự động đang tắt: tưới theo lịch dự phòng, cộng các phiên bơm thử.';
+    else mode.textContent = 'Tự động đang tắt: tưới theo lịch dự phòng.';
+    entries = parseLine(lines.length > 1 ? lines[1] : lines[0]).sort(bySec);
     raw.textContent = 'Dòng 1: ' + lines[0] + '\nDòng 2: ' + (lines.length > 1 ? (lines[1] === '' ? '(rỗng: không tưới)' : lines[1]) : '(không có: dùng dòng 1)');
 
     var a = analyze(entries);
@@ -907,8 +981,6 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       var text = hm(e.sec) + ', ' + fmtDur(Math.min(e.dur, CAP)) + (a.skipped[i] ? ' (sẽ bị bỏ)' : '');
       plan.appendChild(block(cls, e.sec, a.skipped[i] ? e.sec + 300 : end, text));
       summary.push(text);
-      list.appendChild(h('span', { class: 'chip' + (a.skipped[i] ? ' skip' : end <= nowSec ? ' done' : '') },
-        hm(e.sec), h('small', { text: a.skipped[i] ? 'bị bỏ' : fmtDur(Math.min(e.dur, CAP)) })));
     });
     plan.setAttribute('aria-label', entries.length ? 'Lịch tưới hôm nay: ' + summary.join('; ') : 'Hôm nay không có mốc tưới');
 
@@ -925,31 +997,240 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     });
     var line = h('span', { class: 'now-line' });
     line.style.left = pct(nowSec);
-    var tag = h('span', { class: 'now-tag' + (nowSec < DAY * 0.06 ? ' edge-l' : nowSec > DAY * 0.94 ? ' edge-r' : ''), text: 'Bây giờ ' + hm(nowSec - nowSec % 60) });
-    tag.style.left = pct(nowSec);
+    var tg = h('span', { class: 'now-tag' + (nowSec < DAY * 0.06 ? ' edge-l' : nowSec > DAY * 0.94 ? ' edge-r' : ''), text: 'Bây giờ ' + hm(nowSec - nowSec % 60) });
+    tg.style.left = pct(nowSec);
 
     ribbon.className = 'ribbon ribbon-has-tag';
-    ribbon.appendChild(tag);
+    ribbon.appendChild(tg);
     ribbon.appendChild(h('p', { class: 'lane-label', text: 'Theo lịch' }));
     ribbon.appendChild(plan);
     ribbon.appendChild(h('p', { class: 'lane-label', text: 'Thực tế' }));
     ribbon.appendChild(actual);
     ribbon.appendChild(ticks);
     ribbon.appendChild(line);
-    if (!entries.length) list.appendChild(h('span', { class: 'empty', text: 'Không có mốc nào hôm nay.' }));
 
     var rcv = state.received_at ? Date.parse(state.received_at) : 0;
     pend.hidden = false;
     if (savedAt && rcv < savedAt) {
       pend.className = 'pending wait';
-      pend.textContent = 'Lịch vừa lưu chưa tới thiết bị. Thiết bị nhận lịch ở heartbeat kế tiếp (tối đa 5 phút).';
+      pend.textContent = 'Thay đổi vừa rồi chưa tới thiết bị. Thiết bị nhận lịch ở heartbeat kế tiếp (tối đa 5 phút).';
     } else if (savedAt) {
       pend.className = 'pending';
       pend.textContent = 'Thiết bị đã nhận lịch mới lúc ' + stamp(rcv) + '.';
     } else {
       pend.className = 'pending';
-      pend.textContent = 'Lịch lưu ở đây tới thiết bị ở heartbeat kế tiếp (tối đa 5 phút).';
+      pend.textContent = 'Lịch đổi ở đây tới thiết bị ở heartbeat kế tiếp (tối đa 5 phút).';
     }
+  }
+
+  // ---- Thời tiết (mở mục mới tải) ----
+  function loadWeather() {
+    if (!$('wx').open) return;
+    api('/api/weather?hours=48').then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(renderWeather).catch(function (e) {
+      if (e.message !== '401') $('wx-body').textContent = 'Không tải được số liệu thời tiết.';
+    });
+  }
+  function when(ts) { var p = vn(Date.parse(ts)); return hm(p.sec - p.sec % 60) + ' ' + pad(p.d) + '/' + pad(p.m); }
+  function renderWeather(wx) {
+    var box = $('wx-body');
+    box.textContent = '';
+    if (!wx.rain.length) box.appendChild(h('p', { class: 'empty', text: 'Chưa có số liệu mưa Vrain trong 48 giờ qua.' }));
+    else {
+      var last = wx.rain[wx.rain.length - 1];
+      box.appendChild(h('p', null, 'Vrain Đỗ Xuân Hợp, bản ' + when(last.data_ts) + ': cộng dồn từ 19h ', h('b', { text: mm(last.sum_mm) }), '.'));
+      var wet = wx.rain.filter(function (r) { return r.hour_mm > 0; });
+      if (!wet.length) box.appendChild(h('p', { text: 'Không mưa trong 48 giờ qua.' }));
+      wet.forEach(function (r) {
+        box.appendChild(h('p', { class: 'rain-h' }, h('span', { text: when(r.data_ts) }), h('span', { text: '+' + mm(r.hour_mm) + ' (cộng dồn ' + mm(r.sum_mm) + ')' })));
+      });
+    }
+    var temps = wx.metar.filter(function (o) { return typeof o.temp_c === 'number'; });
+    if (temps.length) {
+      var o = temps[temps.length - 1];
+      var t = temps.map(function (x) { return x.temp_c; });
+      box.appendChild(h('p', { text: 'METAR Tân Sơn Nhất ' + when(o.obs_time) + ': ' + o.temp_c + ' °C (48 giờ: ' + Math.min.apply(null, t) + '–' + Math.max.apply(null, t) + ' °C).' }));
+    } else {
+      box.appendChild(h('p', { class: 'empty', text: 'Chưa có METAR trong 48 giờ qua.' }));
+    }
+  }
+
+  // ---- Lịch tưới theo ngày ----
+  function loadCal() {
+    var date = calDate;
+    if (state && state.day && date === state.today) { calDay = state.day; renderCal(); return; }
+    api('/api/day?date=' + encodeURIComponent(date)).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+        return data;
+      });
+    }).then(function (data) {
+      if (date !== calDate) return;
+      calDay = data;
+      renderCal();
+    }).catch(function (e) {
+      if (e.message !== '401') toast('Không tải được lịch ngày ' + dayLabel(date) + ': ' + e.message, true);
+    });
+  }
+  function renderCal() {
+    var day = calDay, today = todayStr();
+    if (!day) return;
+    var editable = day.date >= today;
+    $('cal-name').textContent = dayLabel(day.date) + (relDay(day.date) !== dayLabel(day.date) ? ' (' + relDay(day.date).toLowerCase() + ')' : '');
+    $('cal-sum').textContent = sumText(day);
+    renderSessions($('cal-sessions'), day, editable);
+    renderWarns($('cal-warns'), day);
+    $('cal-add').hidden = !editable;
+  }
+  function setCal(date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    calDate = date;
+    $('cal-date').value = date;
+    loadCal();
+  }
+
+  // ---- Thiết lập tự động ----
+  function formFrom(p) {
+    return {
+      auto: p.auto_enabled,
+      slots: p.slots.map(function (s) { return { sec: s.start_s, phase: s.phase }; }).sort(bySec),
+      block: p.block_s / 60, min_run: p.min_run_s / 60, carry_max: p.carry_max_s / 60,
+      rain_lo: p.rain_lo_mm, rain_hi: p.rain_hi_mm, e_ref: p.e_ref_mm
+    };
+  }
+  function paramsOf(f) {
+    return {
+      auto_enabled: f.auto,
+      slots: f.slots.map(function (s) { return { start_s: s.sec, phase: s.phase }; }),
+      block_s: Math.round(f.block * 60), min_run_s: Math.round(f.min_run * 60), carry_max_s: Math.round(f.carry_max * 60),
+      rain_lo_mm: +f.rain_lo, rain_hi_mm: +f.rain_hi, e_ref_mm: +f.e_ref
+    };
+  }
+  function formDirty() { return form !== null && JSON.stringify(paramsOf(form)) !== formSaved; }
+
+  function numField(label, key, step, unit) {
+    var inp = h('input', { type: 'number', step: step, min: '0', inputmode: 'decimal', id: 'set-' + key });
+    inp.value = String(form[key]);
+    inp.addEventListener('input', function () { form[key] = parseFloat(inp.value); settingsChanged(); });
+    return h('div', { class: 'field' }, h('label', { for: 'set-' + key, text: label + ' (' + unit + ')' }), inp);
+  }
+
+  function renderSettings() {
+    var box = $('settings');
+    box.textContent = '';
+    if (!form) return;
+    var p = settings.params;
+    var chk = h('input', { type: 'checkbox', id: 'set-auto' });
+    chk.checked = form.auto;
+    chk.addEventListener('change', function () { form.auto = chk.checked; settingsChanged(); });
+    var since = p.auto_enabled && p.auto_enabled_at ? 'Đang bật từ ' + stamp(Date.parse(p.auto_enabled_at)) + '.' :
+      'Đang tắt: thiết bị tưới theo lịch dự phòng.';
+    box.appendChild(h('label', { class: 'switch', for: 'set-auto' }, chk, 'Bật lịch tưới tự động'));
+    box.appendChild(h('p', { class: 'day-sum', text: since + ' Bật giữa ngày thì các lần đã qua giờ chốt (6 phút trước giờ tưới) của hôm nay được bỏ qua.' }));
+
+    var slots = h('div', { class: 'entries' });
+    function drawSlots() {
+      slots.textContent = '';
+      form.slots.forEach(function (s, i) {
+        var t = h('input', { type: 'time', 'aria-label': 'Giờ tưới', required: true });
+        t.value = isFinite(s.sec) ? hm(s.sec) : '';
+        t.addEventListener('input', function () { s.sec = parseTime(t.value); settingsChanged(); });
+        var sel = h('select', { 'aria-label': 'Buổi' }, h('option', { value: 'am', text: 'Sáng' }), h('option', { value: 'pm', text: 'Chiều' }));
+        sel.value = s.phase;
+        sel.addEventListener('change', function () { s.phase = sel.value; settingsChanged(); });
+        var del = h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Xoá lần tưới',
+          onclick: function () { form.slots.splice(i, 1); drawSlots(); settingsChanged(); } }, '×');
+        slots.appendChild(h('div', { class: 'slot-row' }, t, sel, del));
+      });
+      slots.appendChild(h('div', { class: 'entries-foot' }, h('button', { type: 'button', class: 'btn-quiet', onclick: function () {
+        var last = form.slots.reduce(function (a, b) { return isFinite(b.sec) && b.sec > a ? b.sec : a; }, 15300);
+        form.slots.push({ sec: Math.min(last + 3600, 67500), phase: last + 3600 >= 43200 ? 'pm' : 'am' });
+        drawSlots(); settingsChanged();
+      } }, '+ Thêm lần tưới')));
+    }
+    drawSlots();
+    box.appendChild(h('div', { class: 'field slots-field' }, h('span', { class: 'label', text: 'Các lần tưới (04:15–18:45, cách nhau ít nhất block + 3 phút; buổi sáng mới dùng phút miễn dư của hôm trước)' }), slots));
+
+    box.appendChild(h('div', { class: 'form-grid' },
+      numField('Block mỗi lần', 'block', '1', 'phút'),
+      numField('Bỏ lần dưới', 'min_run', '1', 'phút'),
+      numField('Mưa không tính dưới', 'rain_lo', '0.1', 'mm'),
+      numField('Mưa đủ, khỏi tưới từ', 'rain_hi', '0.1', 'mm'),
+      numField('Phút dư chuyển sáng hôm sau tối đa', 'carry_max', '1', 'phút'),
+      numField('Bốc hơi ngày nắng chuẩn', 'e_ref', '0.1', 'mm')));
+    box.appendChild(h('p', { class: 'derived', id: 'set-derived' }));
+
+    if (!settings.daily_matches_slots) {
+      var slotsText = settings.params.slots.map(function (s) { return hm(s.start_s); }).join(', ');
+      box.appendChild(h('div', { class: 'callout' },
+        h('p', { text: 'Lịch dự phòng đang khác lịch tự động (' + slotsText + ', mỗi lần ' + mins(settings.params.block_s) +
+          ' phút). Nếu tắt tự động hoặc thiết bị không lấy được lịch mới, nó sẽ tưới theo lịch dự phòng.' }),
+        h('button', { class: 'btn btn-line', type: 'button', id: 'daily-from-slots', onclick: dailyFromSlots }, 'Đặt lịch dự phòng theo lịch tự động')));
+    }
+    box.appendChild(h('div', { class: 'form-foot' },
+      h('p', { id: 'set-msg' }),
+      h('button', { class: 'btn btn-line', type: 'button', id: 'set-revert', onclick: function () {
+        form = formFrom(settings.params); renderSettings(); } }, 'Bỏ thay đổi'),
+      h('button', { class: 'btn', type: 'button', id: 'set-save', onclick: saveSettings }, 'Lưu thiết lập')));
+    settingsChanged();
+  }
+
+  function settingsChanged() {
+    var d = $('set-derived');
+    if (!d || !form) return;
+    var quota = form.slots.length * form.block, span = form.rain_hi - form.rain_lo;
+    d.textContent = '';
+    d.appendChild(document.createTextNode('Quota ngày: '));
+    d.appendChild(h('b', { text: isFinite(quota) ? (Math.round(quota * 10) / 10) + ' phút' : '—' }));
+    d.appendChild(document.createTextNode(' (' + form.slots.length + ' lần × block). Mỗi mm mưa vượt ngưỡng thấp miễn '));
+    d.appendChild(h('b', { text: span > 0 && isFinite(quota) ? (Math.round(quota / span * 10) / 10) + ' phút' : '—' }));
+    d.appendChild(document.createTextNode('.'));
+    var dirty = formDirty();
+    $('set-save').disabled = !dirty;
+    $('set-revert').hidden = !dirty;
+    var msg = $('set-msg');
+    msg.textContent = dirty ? 'Có thay đổi chưa lưu.' : '';
+    var dfs = $('daily-from-slots');
+    if (dfs) dfs.disabled = dirty;
+  }
+
+  function saveSettings() {
+    var wasOn = settings.params.auto_enabled;
+    if (form.auto && !wasOn && !confirm('Bật lịch tưới tự động? Từ giờ server tự tính số phút mỗi lần theo mưa và nắng.')) return;
+    $('set-save').disabled = true;
+    send('PUT', '/api/settings', paramsOf(form)).then(function (res) {
+      if (!res.ok) { settingsChanged(); return; }
+      setSettings(res.data, true);
+      savedAt = nowMs();
+      toast(form.auto && !wasOn ? 'Đã bật lịch tự động.' : !form.auto && wasOn ? 'Đã tắt lịch tự động. Thiết bị quay về lịch dự phòng.' : 'Đã lưu thiết lập.');
+      refresh();
+    });
+  }
+
+  function dailyFromSlots() {
+    if (isDirty() && !confirm('Lịch dự phòng đang sửa dở sẽ bị thay. Tiếp tục?')) return;
+    send('POST', '/api/settings/daily-from-slots').then(function (res) {
+      if (!res.ok) return;
+      setSettings(res.data, true);
+      setSaved({ daily: res.data.daily });
+      savedAt = nowMs();
+      toast('Đã đặt lịch dự phòng theo lịch tự động.');
+      refresh();
+    });
+  }
+
+  // setSettings nhận /api/settings; vẽ lại form khi dữ liệu đổi mà người dùng không đang sửa dở.
+  function setSettings(data, force) {
+    var js = JSON.stringify(data), dirty = formDirty();
+    settings = data;
+    formSaved = JSON.stringify(paramsOf(formFrom(data.params)));
+    if (force || (!dirty && js !== settingsJSON)) {
+      form = formFrom(data.params);
+      renderSettings();
+    }
+    settingsJSON = js;
   }
 
   // ---- Hoạt động gần đây ----
@@ -1005,34 +1286,38 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   function refresh() {
     if (refreshing) return;
     refreshing = true;
-    Promise.all([api('/api/state'), api('/api/events?limit=' + eventLimit)]).then(function (rs) {
-      if (!rs[0].ok || !rs[1].ok) throw new Error('HTTP ' + rs[0].status + '/' + rs[1].status);
-      return Promise.all([rs[0].json(), rs[1].json()]);
+    Promise.all([api('/api/state'), api('/api/events?limit=' + eventLimit), api('/api/settings')]).then(function (rs) {
+      if (!rs[0].ok || !rs[1].ok || !rs[2].ok) throw new Error('HTTP ' + rs[0].status + '/' + rs[1].status + '/' + rs[2].status);
+      return Promise.all([rs[0].json(), rs[1].json(), rs[2].json()]);
     }).then(function (data) {
       state = data[0];
       events = data[1];
       skew = Date.parse(state.now) - Date.now();
+      setSettings(data[2], false);
       $('conn').classList.remove('show');
       if (state.schedule) {
         $('load-error').textContent = '';
         if (!isDirty()) {
-          var fresh = canon(fromSchedule(state.schedule));
+          var fresh = JSON.stringify({ daily: lineOf(parseLine(state.schedule.daily)) });
           if (fresh !== savedJSON) setSaved(state.schedule);
         }
       } else if (!model) {
-        // Chưa có file hoặc file lỗi: bắt đầu từ một lịch mẫu, lưu sẽ ghi đè.
-        model = { daily: [{ sec: 7 * 3600, dur: DEF_DUR }], days: [] };
+        // Chưa có lịch dự phòng: bắt đầu từ một lịch mẫu, lưu sẽ tạo mới.
+        model = { daily: [{ sec: 7 * 3600, dur: DEF_DUR }] };
         savedJSON = '';
         renderSchedule();
         updateSaveBar();
       }
       if (!state.schedule) {
         $('load-error').textContent = '';
-        $('load-error').appendChild(h('p', { class: 'load-error', text: 'Lịch trên server dùng không được: ' + state.schedule_error + '. Lưu lịch ở đây sẽ ghi đè file.' }));
+        $('load-error').appendChild(h('p', { class: 'load-error', text: 'Lịch dự phòng dùng không được: ' + state.schedule_error + '. Lưu lịch ở đây sẽ tạo mới.' }));
       }
+      if (!calDate) setCal(state.today);
+      else loadCal();
       renderStatus();
       renderToday();
       renderEvents();
+      loadWeather();
       $('updated').textContent = 'Cập nhật lúc ' + hm(vn(nowMs()).sec, true);
     }).catch(function (e) {
       if (e.message !== '401') $('conn').classList.add('show');
@@ -1043,33 +1328,25 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   $('save').addEventListener('click', function () { save(); });
   $('revert').addEventListener('click', function () {
     if (state && state.schedule) setSaved(state.schedule);
-    else { model = { daily: [{ sec: 7 * 3600, dur: DEF_DUR }], days: [] }; renderSchedule(); updateSaveBar(); }
-  });
-  $('add-today').addEventListener('click', function () {
-    if (!model) return;
-    var existed = !!findDay(todayStr());
-    ensureDay(todayStr());
-    renderSchedule(); changed();
-    if (existed) toast('Hôm nay đã có lịch riêng.');
-    var el = document.querySelector('.day.is-today');
-    if (el) el.scrollIntoView({ block: 'center' });
-  });
-  $('add-day').addEventListener('click', function () {
-    var v = $('new-date').value;
-    if (!model) return;
-    if (!v) { $('new-date').focus(); toast('Chọn ngày trước.', true); return; }
-    if (findDay(v)) { toast(dayLabel(v) + ' đã có lịch riêng.'); return; }
-    ensureDay(v);
-    renderSchedule(); changed();
-  });
-  $('prune').addEventListener('click', function () {
-    var today = todayStr();
-    model.days = model.days.filter(function (d) { return d.date >= today; });
-    renderSchedule(); changed();
+    else { model = { daily: [{ sec: 7 * 3600, dur: DEF_DUR }] }; renderSchedule(); updateSaveBar(); }
   });
   $('more').addEventListener('click', function () {
     eventLimit = Math.min(1000, eventLimit + 200);
     refresh();
+  });
+  $('wx').addEventListener('toggle', loadWeather);
+  $('cal-date').addEventListener('change', function () { setCal($('cal-date').value); });
+  $('cal-prev').addEventListener('click', function () { if (calDate) setCal(addDays(calDate, -1)); });
+  $('cal-next').addEventListener('click', function () { if (calDate) setCal(addDays(calDate, 1)); });
+  $('cal-today').addEventListener('click', function () { setCal(todayStr()); });
+  $('add-btn').addEventListener('click', function () {
+    var sec = parseTime($('add-time').value), n = parseFloat($('add-min').value);
+    if (!isFinite(sec)) { $('add-time').focus(); toast('Chọn giờ bắt đầu.', true); return; }
+    if (!(n > 0 && n <= 30)) { $('add-min').focus(); toast('Số phút phải trong 1–30.', true); return; }
+    addSession(calDate, sec, Math.round(n * 60), $('add-note').value.trim(),
+      'Đã thêm phiên ' + hm(sec) + ' ' + relDay(calDate).toLowerCase() + '.').then(function (ok) {
+      if (ok) $('add-note').value = '';
+    });
   });
 
   var trialMin = $('trial-min'), trialBtn = $('trial-btn');
@@ -1086,31 +1363,28 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   trialMin.addEventListener('input', trialLabel);
   trialBtn.addEventListener('click', function () {
     var n = parseInt(trialMin.value, 10);
-    if (!(n > 0) || !model) { trialMin.focus(); return; }
+    if (!(n > 0) || !state) { trialMin.focus(); return; }
     var target = trialTarget(n);
-    var before = JSON.parse(JSON.stringify(model));
-    var day = ensureDay(target.date);
-    if (day.off) { day.off = false; day.entries.length = 0; }
-    day.entries.push({ sec: target.sec, dur: DEF_DUR });
-    day.entries.sort(bySec);
-    renderSchedule(); changed();
     var when = hm(target.sec) + (target.date === todayStr() ? ' hôm nay' : ' ngày mai');
-    var idx = day.entries.findIndex(function (e) { return e.sec === target.sec; });
-    if (analyze(day.entries).skipped[idx]) {
-      model = before;
-      renderSchedule(); changed();
-      toast('Mốc ' + when + ' quá gần mốc khác (bơm cần nghỉ 3 phút giữa hai lần) nên thiết bị sẽ bỏ qua. Chưa thêm; hãy chọn số phút khác.', true);
-      return;
+    if (target.date === state.today && typeof state.today_body === 'string') {
+      // Thử trước với lịch thiết bị đang giữ hôm nay: mốc quá sát mốc khác sẽ bị firmware bỏ.
+      var lines = state.today_body.split('\n');
+      var entries = parseLine(lines.length > 1 ? lines[1] : lines[0]);
+      entries.push({ sec: target.sec, dur: DEF_DUR });
+      if (analyze(entries).skipped[entries.length - 1]) {
+        toast('Mốc ' + when + ' quá gần mốc khác (bơm cần nghỉ 3 phút giữa hai lần) nên thiết bị sẽ bỏ qua. Chưa thêm; hãy chọn số phút khác.', true);
+        return;
+      }
     }
-    save('Đã thêm mốc tưới thử ' + when + ' và lưu lịch. Thiết bị nhận ở heartbeat kế tiếp (tối đa 5 phút).');
+    addSession(target.date, target.sec, DEF_DUR, 'tưới thử',
+      'Đã thêm phiên tưới thử ' + when + '. Thiết bị nhận ở heartbeat kế tiếp (tối đa 5 phút).');
   });
 
   window.addEventListener('beforeunload', function (e) {
-    if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+    if (isDirty() || formDirty()) { e.preventDefault(); e.returnValue = ''; }
   });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
 
-  $('new-date').value = addDays(todayStr(), 1);
   trialLabel();
   refresh();
   setInterval(function () {

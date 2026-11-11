@@ -27,12 +27,14 @@ import (
 //	GET  /              trang UI (chưa đăng nhập ⇒ form đăng nhập)
 //	POST /login         form "password" ⇒ cookie phiên
 //	POST /logout
-//	GET  /api/state     heartbeat cuối + online + lịch hiện hành + body lịch trả hôm nay
+//	GET  /api/state     heartbeat cuối + online + lịch hiện hành + body lịch trả hôm nay + "day"
+//	                    (lịch tưới hôm nay, cùng dạng /api/day)
 //	GET  /api/schedule
 //	PUT  /api/schedule  JSON {"daily": "..."}, lưu vào SQLite
 //	POST /api/sessions  JSON {"date","start_s","run_s","note"} ⇒ thêm phiên bơm thử (manual)
 //	DELETE /api/sessions/{id}  xoá phiên manual
 //	GET  /api/events    ?limit=N (mặc định 100, tối đa 1000), mới nhất trước
+//	Lịch tưới tự động, thời tiết, tham số: xem api_auto.go.
 //
 // Mọi request POST khác vẫn là heartbeat của thiết bị (Bearer token), như trước.
 
@@ -73,6 +75,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions", s.api(s.handleAddSession))
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.api(s.handleDeleteSession))
 	mux.HandleFunc("GET /api/events", s.api(s.handleEvents))
+	mux.HandleFunc("GET /api/day", s.api(s.handleDay))
+	mux.HandleFunc("POST /api/sessions/{id}/cancel", s.api(s.handleCancelSession))
+	mux.HandleFunc("GET /api/weather", s.api(s.handleWeather))
+	mux.HandleFunc("GET /api/settings", s.api(s.handleGetSettings))
+	mux.HandleFunc("PUT /api/settings", s.api(s.handlePutSettings))
+	mux.HandleFunc("POST /api/settings/daily-from-slots", s.api(s.handleDailyFromSlots))
 	return mux
 }
 
@@ -382,6 +390,7 @@ type stateResponse struct {
 	Schedule      *Schedule       `json:"schedule"`
 	ScheduleError string          `json:"schedule_error,omitempty"`
 	TodayBody     *string         `json:"today_body"`
+	Day           *dayResponse    `json:"day"` // lịch tưới hôm nay; null nếu đọc lỗi
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +416,11 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.TodayBody = &body
 		}
+	}
+	if day, err := s.dayView(resp.Today, now); err != nil {
+		log.Printf("UI: lỗi đọc lịch hôm nay: %v", err)
+	} else {
+		resp.Day = day
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

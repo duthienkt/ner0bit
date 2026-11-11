@@ -72,6 +72,12 @@ var apiRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/schedule"},
 	{http.MethodPut, "/api/schedule"},
 	{http.MethodGet, "/api/events"},
+	{http.MethodGet, "/api/day"},
+	{http.MethodGet, "/api/weather"},
+	{http.MethodGet, "/api/settings"},
+	{http.MethodPut, "/api/settings"},
+	{http.MethodPost, "/api/settings/daily-from-slots"},
+	{http.MethodPost, "/api/sessions/1/cancel"},
 }
 
 func TestUIDisabledWithoutPassword(t *testing.T) {
