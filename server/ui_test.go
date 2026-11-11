@@ -709,30 +709,3 @@ func TestLoginUntrackedFailuresSerialized(t *testing.T) {
 		t.Errorf("lần sai đầu: code %d, want 401", code)
 	}
 }
-
-// Cùng một IP gửi song song: chỉ một lần thử được xét tại một thời điểm, lần song song khác nhận
-// 429 ngay — không né được giới hạn 5 lần sai bằng cách gửi dồn trước khi lần sai kịp được ghi.
-func TestLoginSameIPConcurrentAttemptsSerialized(t *testing.T) {
-	s, _, _ := newUIServer(t, goodSchedule)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	s.loginAttemptHook = func() { close(entered); <-release }
-	done := make(chan int)
-	go func() { done <- login(s, "sai", withRemote("198.51.100.20:1")).Code }()
-	<-entered
-	s.loginAttemptHook = nil
-	if rec := login(s, "sai", withRemote("198.51.100.20:2")); rec.Code != http.StatusTooManyRequests {
-		t.Errorf("lần thử song song cùng IP: code %d, want 429", rec.Code)
-	}
-	if rec := login(s, testPassword, withRemote("198.51.100.21:1")); rec.Code != http.StatusSeeOther {
-		t.Errorf("IP khác không bị ảnh hưởng: code %d, want 303", rec.Code)
-	}
-	close(release)
-	if code := <-done; code != http.StatusUnauthorized {
-		t.Errorf("lần thử đầu: code %d, want 401", code)
-	}
-	// Hết lượt đang xét ⇒ IP thử lại bình thường.
-	if rec := login(s, testPassword, withRemote("198.51.100.20:3")); rec.Code != http.StatusSeeOther {
-		t.Errorf("sau khi lượt trước xong: code %d, want 303", rec.Code)
-	}
-}

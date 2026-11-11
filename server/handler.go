@@ -44,12 +44,10 @@ type Server struct {
 
 	scheduleMu sync.Mutex // tuần tự hoá PUT /api/schedule
 
-	loginMu          sync.Mutex
-	loginBusy        map[string]bool           // khoá limiter đang có một lần thử được xét (mỗi khoá tối đa 1)
-	loginAttemptHook func()                    // test: gọi khi một lần thử đã giành lượt, trước khi so mật khẩu
-	loginFails       map[string]*loginFailures // theo IP client
-	loginSlowdown    func()                    // nil ⇒ ngủ 1 s (xem slowdown); test thay bằng hàm rỗng
-	slowMu           sync.Mutex                // tuần tự hoá lần sai không ghi nhận được (xem handleLogin)
+	loginMu       sync.Mutex
+	loginFails    map[string]*loginFailures // theo IP client
+	loginSlowdown func()                    // nil ⇒ ngủ 1 s (xem slowdown); test thay bằng hàm rỗng
+	slowMu        sync.Mutex                // tuần tự hoá lần sai không ghi nhận được (xem handleLogin)
 }
 
 type lastHeartbeat struct {

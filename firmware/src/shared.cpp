@@ -65,6 +65,8 @@ uint32_t s_generation = 0;
 // Bản sao lastStop giữ qua reset mềm / WDT / panic / brownout (không được khởi tạo lúc boot).
 // Cập nhật cùng lúc với lastStop trong queue, ở cả hai chế độ storage. Xem retained_stop.h.
 RTC_NOINIT_ATTR RetainedStop s_retainedStop;
+RTC_NOINIT_ATTR uint32_t s_setupRequest;  // = kSetupMagic ⇒ boot vào chế độ cấu hình
+constexpr uint32_t kSetupMagic = 0x53455455;  // "SETU"
 
 // Ghi lastStop xuống queue (AT24C32 / RAM) và bản sao giữ qua reset. Gọi trong lock.
 void writeLastStop(uint32_t v) {
@@ -254,6 +256,37 @@ int16_t readDs3231Temp() {
     return kTempUnknown;
 }
 
+const char* resetReasonCode() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON: return "poweron";
+        case ESP_RST_SW: return "sw";
+        case ESP_RST_PANIC: return "panic";
+        case ESP_RST_INT_WDT: return "int_wdt";
+        case ESP_RST_TASK_WDT: return "task_wdt";
+        case ESP_RST_WDT: return "wdt";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_DEEPSLEEP: return "deepsleep";
+        case ESP_RST_EXT: return "ext";
+        default: return "unknown";  // USB, JTAG, eFuse, glitch nguồn, CPU lockup, ...
+    }
+}
+
+const char* resetReasonText() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON: return "cấp điện";
+        case ESP_RST_SW: return "phần mềm (chủ động khởi động lại)";
+        case ESP_RST_PANIC: return "lỗi phần mềm (panic)";
+        case ESP_RST_INT_WDT: return "watchdog ngắt (treo)";
+        case ESP_RST_TASK_WDT: return "watchdog (treo)";
+        case ESP_RST_WDT: return "watchdog khác (treo)";
+        case ESP_RST_BROWNOUT: return "sụt áp nguồn (brownout)";
+        case ESP_RST_DEEPSLEEP: return "thức dậy từ deep sleep";
+        case ESP_RST_EXT: return "chân reset ngoài";
+        case ESP_RST_USB: return "USB (nạp firmware / mở cổng Serial)";
+        default: return "không rõ";
+    }
+}
+
 uint32_t monoSec() { return (uint32_t)(esp_timer_get_time() / 1000000ULL); }
 
 namespace {
@@ -330,4 +363,12 @@ void stopPumpForRestart() {
     if (switched) logStorageFailover();
     if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy trước khi khởi động lại");
     logEvent(r);
+}
+
+void requestSetupOnNextBoot() { s_setupRequest = kSetupMagic; }
+
+bool consumeSetupRequest() {
+    const bool req = s_setupRequest == kSetupMagic && esp_reset_reason() != ESP_RST_POWERON;
+    s_setupRequest = 0;
+    return req;
 }

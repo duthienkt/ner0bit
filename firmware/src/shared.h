@@ -31,6 +31,11 @@ constexpr size_t kScheduleBodyMax = 1024;
 // Tạo g_lock. Gọi một lần trong setup(), trước mọi truy cập dùng lock và trước startNetTask().
 void sharedInit();
 
+// Yêu cầu vào chế độ cấu hình ở lần khởi động kế tiếp (lệnh "setup" qua Serial). Cờ nằm trong RTC
+// memory: giữ qua ESP.restart(), mất khi mất điện. consumeSetupRequest() đọc rồi xoá cờ.
+void requestSetupOnNextBoot();
+bool consumeSetupRequest();
+
 // Log ra Serial, mỗi dòng có tiền tố giờ: "17:38:13 " (giờ VN, khi đồng hồ hợp lệ) hoặc
 // "+12s " (uptime, khi chưa có giờ). Cả dòng in một lần dưới khoá riêng ⇒ 2 task không chen nhau.
 void nlog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));  // fmt tự kèm '\n'
@@ -88,6 +93,12 @@ constexpr uint8_t kDs3231TempFails = 3;
 // Nhiệt độ DS3231 (0,25 °C) hoặc kTempUnknown (không module / đọc lỗi). kDs3231TempFails lần lỗi
 // liên tiếp ⇒ g_ds3231 = Failed. Gọi trong lock (lúc heartbeat).
 int16_t readDs3231Temp();
+
+// Lý do khởi động lần này (esp_reset_reason()). Mã ASCII ngắn cho trường "reset" của heartbeat:
+// poweron | sw | panic | int_wdt | task_wdt | wdt | brownout | deepsleep | ext | unknown.
+const char* resetReasonCode();
+// Mô tả tiếng Việt cho log lúc boot, vd. "watchdog (treo)".
+const char* resetReasonText();
 
 // Giây monotonic kể từ boot (esp_timer 64 bit, không wrap như millis()) — ruling R3.
 uint32_t monoSec();

@@ -9,7 +9,7 @@ Ner0bit là dự án hệ thống tưới nước tự động dùng ESP32. Thi�
 - Mỗi lần bật/tắt bơm hoặc bỏ mốc là một event (`start` / `stop` / `skipped`), gửi lên server ~3 giây sau khi xảy ra. Heartbeat kèm heap trống, trạng thái module, nhiệt độ DS3231.
 - Module DS3231 + AT24C32 **tuỳ chọn**: có module thì giữ giờ qua mất điện khi không có mạng, queue events và lịch cache nằm trên EEPROM; không có thì queue events nằm trong RAM, lịch cache trong NVS — mất điện lúc không có mạng thì chờ có mạng lại mới tưới.
 - Failsafe: mất internet vẫn tưới theo lịch cache lần fetch cuối; events gửi bù khi có mạng lại.
-- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, sau đó giữ nút BOOT ≥ 3 giây trong 5 giây đầu sau khi boot. Mất WiFi không tự mở hotspot.
+- Setup qua WiFi hotspot `Ner0bit-Setup` (captive portal): điền WiFi + Server URL (HTTPS; `http://` chỉ để demo) + Token. Vào lại chế độ cấu hình: nhấn RESET, trong 5 giây đầu (LED chớp nhanh) bắt đầu nhấn BOOT và giữ 3 giây (LED sáng liên tục khi đang giữ); hoặc gõ `setup` trong `pio device monitor`. Mất WiFi không tự mở hotspot.
 - Hệ thống 1 thiết bị, 1 server; heartbeat xác thực bằng token.
 - An toàn bơm: hard-cap 30 phút/phiên, nghỉ tối thiểu 3 phút giữa 2 lần bật.
 
@@ -82,11 +82,11 @@ Mở URL server bằng trình duyệt (điện thoại hoặc máy tính), đăn
 
 - Trạng thái thiết bị: online (heartbeat ≤ 15 phút), bơm bật/tắt, nhiệt độ, WiFi, bộ nhớ, module DS3231/AT24C32, hàng đợi event, giờ thiết bị.
 - Dải 24 giờ hôm nay: các mốc theo lịch server trả và các lần bơm chạy thật (từ events).
-- Sửa lịch hằng ngày và lịch riêng theo ngày (hoặc "không tưới"), có cảnh báo mốc > 30 phút (bị cắt) và mốc sẽ bị bỏ vì chưa nghỉ đủ 3 phút. Lưu là ghi thẳng `schedule.json` (atomic).
+- Sửa lịch hằng ngày và lịch riêng theo ngày (hoặc "không tưới"), có cảnh báo mốc > 30 phút (bị cắt) và mốc sẽ bị bỏ vì chưa nghỉ đủ 10 phút. Lưu là ghi thẳng `schedule.json` (atomic).
 - "Tưới thử": thêm mốc 5 phút cho hôm nay sau N phút (mặc định 7) rồi lưu ngay. Thiết bị nhận lịch ở heartbeat kế tiếp (≤ 5 phút).
 - Hoạt động gần đây: bật/tắt/bỏ mốc, nguồn, lý do. Trang tự làm mới mỗi 15 giây.
 
-`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP; `NER0BIT_TRUST_CF_HEADER=1` ⇒ lấy IP thật từ `CF-Connecting-IP` — chỉ bật khi server chỉ nhận request qua Cloudflare Tunnel). Đứng sau reverse proxy khác (Caddy, nginx) mà không bật biến này thì mọi request mang IP của proxy ⇒ giới hạn thành chung cho mọi người (người lạ dò sai có thể làm chủ nhà bị khoá tạm 10 phút) — triển khai được hỗ trợ là Cloudflare Tunnel ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
+`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP; `NER0BIT_TRUST_CF_HEADER=1` ⇒ lấy IP thật từ `CF-Connecting-IP` — chỉ bật khi server chỉ nhận request qua Cloudflare Tunnel) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
 
 Log: `data/heartbeats.jsonl`, `data/events.jsonl` (mỗi dòng một JSON). Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
 

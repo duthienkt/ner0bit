@@ -18,13 +18,13 @@ static Event ev(EventType type, uint32_t at, Source src, Reason reason) {
 
 // Info mặc định cho test: module đều ok, 31.25 °C, queue 3.
 static HeartbeatInfo info(bool pumpOn, uint32_t uptime = 123456) {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", uptime, -58, pumpOn, 182344, 150212,
+    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", "task_wdt", uptime, -58, pumpOn, 182344, 150212,
                        ModuleState::Ok, ModuleState::Ok, 125, 3, 1794323100};
     return h;
 }
 
 static const char* kPrefixOff =
-    "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":123456,\"rssi\":-58,"
+    "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"reset\":\"task_wdt\",\"uptime_s\":123456,\"rssi\":-58,"
     "\"pump_on\":false,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"ok\",\"at24c32\":\"ok\","
     "\"temp_c\":31.25,\"queue\":3,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[";
 
@@ -74,7 +74,7 @@ void test_build_no_events() {
     char buf[512];
     size_t n = buildHeartbeat(buf, sizeof(buf), h, nullptr, 0);
     const char* expected =
-        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":123456,\"rssi\":-58,"
+        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"reset\":\"task_wdt\",\"uptime_s\":123456,\"rssi\":-58,"
         "\"pump_on\":false,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"ok\",\"at24c32\":\"ok\","
         "\"temp_c\":31.25,\"queue\":3,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[]}";
     TEST_ASSERT_EQUAL_STRING(expected, buf);
@@ -90,7 +90,7 @@ void test_temp_unknown_omitted() {
     char buf[512];
     size_t n = buildHeartbeat(buf, sizeof(buf), h, nullptr, 0);
     const char* expected =
-        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"uptime_s\":7,\"rssi\":-58,"
+        "{\"id\":\"a4cf12b8e901\",\"fw\":\"0.1.0\",\"reset\":\"task_wdt\",\"uptime_s\":7,\"rssi\":-58,"
         "\"pump_on\":true,\"heap_free\":182344,\"heap_min\":150212,\"ds3231\":\"absent\",\"at24c32\":\"absent\","
         "\"queue\":0,\"rtc\":\"2026-11-10T15:05:00+07:00\",\"events\":[]}";
     TEST_ASSERT_EQUAL_STRING(expected, buf);
@@ -196,11 +196,11 @@ void test_buffer_exact_fit_boundary() {
     TEST_ASSERT_EQUAL_UINT32(0, buildHeartbeat(buf, n, h, &e, 1));
 }
 
-// Trường hợp xấu nhất: mọi số dài nhất, chuỗi trạng thái dài nhất ("lost_power"), nhiệt độ âm dài
-// nhất, 20 event với tổ hợp tên dài nhất mà formatter có thể in (skipped + failsafe + capped — kể cả
-// record hỏng), epoch max.
+// Trường hợp xấu nhất: mọi số dài nhất, lý do reset dài nhất ("deepsleep"), chuỗi trạng thái dài
+// nhất ("lost_power"), nhiệt độ âm dài nhất, 20 event với tổ hợp tên dài nhất mà formatter có thể in
+// (skipped + failsafe + capped — kể cả record hỏng), epoch max.
 void test_max_events_fits_buf_size() {
-    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", 4294967295u, INT32_MIN, false, 4294967295u, 4294967295u,
+    HeartbeatInfo h = {"a4cf12b8e901", "0.1.0", "deepsleep", 4294967295u, INT32_MIN, false, 4294967295u, 4294967295u,
                        ModuleState::LostPower, ModuleState::LostPower, INT16_MIN + 1, 65535, 4294967295u};
     Event evs[kMaxEventsPerHeartbeat];
     for (uint16_t i = 0; i < kMaxEventsPerHeartbeat; i++)

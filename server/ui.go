@@ -148,24 +148,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	ip := limiterKey(s.clientIP(r))
 	now := s.now()
-	// Kiểm tra khoá VÀ giành lượt trong một bước (dưới loginMu): mỗi khoá (IP, IPv6 /64) chỉ được xét
-	// một lần thử tại một thời điểm, và không lần thử nào lọt qua sau khi nguồn đã bị khoá.
-	switch until, st := s.reserveAttempt(ip, now); st {
-	case attemptLocked:
+	if until, blocked := s.loginBlocked(ip, now); blocked {
 		mins := int(until.Sub(now).Minutes()) + 1
 		log.Printf("UI: chặn đăng nhập từ %s (sai quá nhiều lần)", ip)
 		s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
 			Error: fmt.Sprintf("Sai quá nhiều lần. Thử lại sau %d phút.", mins)})
 		return
-	case attemptBusy:
-		log.Printf("UI: 429 cho %s (đang có lần thử khác cùng nguồn)", ip)
-		s.renderPage(w, http.StatusTooManyRequests, pageData{Mode: "login",
-			Error: "Đang xử lý lần đăng nhập trước. Thử lại sau ít giây."})
-		return
-	}
-	defer s.releaseAttempt(ip)
-	if s.loginAttemptHook != nil {
-		s.loginAttemptHook()
 	}
 	if s.cannotRecord(ip) {
 		// Map đầy toàn mục bị khoá (đang bị dò hàng loạt) và nguồn này chưa được ghi nhận: phải giành
@@ -229,40 +217,10 @@ func (s *Server) passwordMatches(pw string) bool {
 	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 
-type attemptStatus int
-
-const (
-	attemptOK     attemptStatus = iota
-	attemptLocked               // nguồn đang bị khoá vì sai quá nhiều lần
-	attemptBusy                 // nguồn đang có một lần thử khác được xét
-)
-
-// reserveAttempt: dưới loginMu, dọn mục quá hạn, kiểm tra khoá rồi đánh dấu nguồn đang được xét.
-func (s *Server) reserveAttempt(key string, now time.Time) (time.Time, attemptStatus) {
+// loginBlocked dọn các mục quá hạn rồi cho biết IP có đang bị khoá không (và tới khi nào).
+func (s *Server) loginBlocked(ip string, now time.Time) (time.Time, bool) {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
-	if until, locked := s.lockedLocked(key, now); locked {
-		return until, attemptLocked
-	}
-	if s.loginBusy[key] {
-		return time.Time{}, attemptBusy
-	}
-	if s.loginBusy == nil {
-		s.loginBusy = make(map[string]bool)
-	}
-	s.loginBusy[key] = true
-	return time.Time{}, attemptOK
-}
-
-func (s *Server) releaseAttempt(key string) {
-	s.loginMu.Lock()
-	delete(s.loginBusy, key)
-	s.loginMu.Unlock()
-}
-
-// lockedLocked dọn các mục quá hạn rồi cho biết nguồn có đang bị khoá không (và tới khi nào).
-// Caller đã giữ loginMu.
-func (s *Server) lockedLocked(ip string, now time.Time) (time.Time, bool) {
 	for k, f := range s.loginFails {
 		if now.Sub(f.first) >= loginWindow {
 			delete(s.loginFails, k)

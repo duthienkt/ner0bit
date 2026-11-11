@@ -1,20 +1,24 @@
 #include "portal.h"
 
+#include "boot_window.h"
+
 #include <Arduino.h>
 #include <DNSServer.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_task_wdt.h>
 #include <string.h>
 
 #include "pins.h"
 #include "shared.h"
 
+// Cờ của core (cores/esp32/main.cpp): true khi enableLoopWDT() đã thêm loop task vào watchdog.
+extern bool loopTaskWDTEnabled;
+
 namespace portal {
 
 namespace {
 
-constexpr uint32_t kWindowMs = 5000;       // cửa sổ kiểm tra nút BOOT lúc boot
-constexpr uint32_t kHoldMs = 3000;         // giữ liên tục ≥ 3 s ⇒ setup mode
 constexpr uint32_t kBlinkMs = 100;         // LED nháy nhanh trong cửa sổ
 constexpr uint32_t kIdleTimeoutMs = 10UL * 60 * 1000;  // có cấu hình cũ, 10 phút không lưu
 constexpr uint32_t kRestartDelayMs = 1000; // chờ gửi xong trang "đã lưu" rồi mới restart
@@ -173,29 +177,22 @@ void handleNotFound() {
 bool bootButtonHeld() {
     pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
     pinMode(LED_PIN, OUTPUT);
+    nlog("[main] chờ nút BOOT: nhấn trong %lu s đầu, giữ %lu s ⇒ setup (LED chớp nhanh)\n",
+         (unsigned long)(kBootWindowMs / 1000), (unsigned long)(kBootHoldMs / 1000));
 
     const uint32_t t0 = millis();
-    bool pressed = false;
-    uint32_t pressedSince = 0;
-    bool held = false;
-    for (uint32_t now = t0; now - t0 < kWindowMs; now = millis()) {
-        digitalWrite(LED_PIN, ((now - t0) / kBlinkMs) % 2 == 0 ? kLedOn : kLedOff);
-        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-            if (!pressed) {
-                pressed = true;
-                pressedSince = now;
-            }
-            if (now - pressedSince >= kHoldMs) {
-                held = true;
-                break;
-            }
-        } else {
-            pressed = false;  // nhả nút ⇒ đếm lại từ đầu
-        }
+    BootWindow w(t0);
+    BootDecision d = BootDecision::Waiting;
+    while (d == BootDecision::Waiting) {
+        const uint32_t now = millis();
+        // Đang giữ nút: LED sáng liên tục để báo đã nhận; chưa nhấn: chớp nhanh.
+        const bool on = w.holding() || ((now - t0) / kBlinkMs) % 2 == 0;
+        digitalWrite(LED_PIN, on ? kLedOn : kLedOff);
+        d = w.update(now, digitalRead(BOOT_BUTTON_PIN) == LOW);
         delay(10);
     }
     digitalWrite(LED_PIN, kLedOff);
-    return held;
+    return d == BootDecision::Setup;
 }
 
 void run(const NetConfig* current) {
@@ -220,8 +217,12 @@ void run(const NetConfig* current) {
     nlog("[portal] AP \"%s\" (không mật khẩu), mở http://192.168.4.1/%s\n", kApSsid,
                   current ? " — 10 phút không lưu sẽ khởi động lại" : "");
 
+    // Vòng lặp này thay loop() (không bao giờ return) nên tự nuôi watchdog của loop task (setup()
+    // đã bật, timeout 10 s). handleClient() xong trong vài ms với client bình thường; client cố ý
+    // gửi rất chậm có thể giữ nó lâu hơn ⇒ watchdog reset (bơm tắt, boot lại) — chấp nhận.
     const uint32_t start = millis();
     for (;;) {
+        if (loopTaskWDTEnabled) esp_task_wdt_reset();  // như core làm trước mỗi loop()
         s_dns->processNextRequest();
         s_server->handleClient();
         schedulerTick();
