@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +24,8 @@ var vietnam = time.FixedZone("ICT", 7*3600)
 type Server struct {
 	Token      string // so với header "Authorization: Bearer <token>"
 	DeviceID   string // MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
-	DataDir    string // chứa schedule.json, heartbeats.jsonl, events.jsonl
+	Store      *Store // SQLite: heartbeat, event, lịch
+	DataDir    string // thư mục dữ liệu; chỉ dùng để nhập file cũ (schedule.json...) lúc khởi động
 	UIPassword string // mật khẩu giao diện web; rỗng ⇒ tắt UI
 	// TrustCFHeader: lấy IP client từ header CF-Connecting-IP (giới hạn đăng nhập sai theo IP).
 	// Chỉ bật khi server CHỈ nhận request qua Cloudflare Tunnel — mở port trực tiếp thì client tự
@@ -34,15 +33,11 @@ type Server struct {
 	TrustCFHeader bool
 	Now           func() time.Time // nil ⇒ time.Now
 
-	mu sync.Mutex // tuần tự hoá ghi/đọc file log
-
 	routesOnce sync.Once
 	handler    http.Handler
 
 	lastMu sync.Mutex
 	last   *lastHeartbeat // heartbeat cuối nhận được (nil ⇒ chưa có)
-
-	scheduleMu sync.Mutex // tuần tự hoá PUT /api/schedule
 
 	loginMu       sync.Mutex
 	loginFails    map[string]*loginFailures // theo IP client
@@ -51,6 +46,9 @@ type Server struct {
 
 	schedMu   sync.Mutex        // giữ lastSched
 	lastSched map[string]string // body lịch trả gần nhất theo id, để nhận ra lịch mới
+
+	capMu         sync.Mutex // giữ capWarnedHour
+	capWarnedHour string     // giờ ("YYYY-MM-DD HH") đã ghi cảnh báo dòng lịch quá 20 mốc
 }
 
 type lastHeartbeat struct {
@@ -113,24 +111,23 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Nạp lịch TRƯỚC khi ghi log: lịch lỗi ⇒ 503, ESP giữ events và gửi lại sau,
+	// Đọc lịch TRƯỚC khi ghi log: lỗi DB hoặc chưa có lịch ⇒ 503, ESP giữ events và gửi lại sau,
 	// nên lúc này không ghi để tránh trùng.
-	sched, err := loadSchedule(filepath.Join(s.DataDir, "schedule.json"))
+	now := s.now()
+	body, err := s.deviceBody(now)
 	if err != nil {
 		log.Printf("lỗi lịch: %v", err)
 		http.Error(w, "schedule unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	now := s.now()
-	if err := s.record(now, hb.ID, raw, hb.Events); err != nil {
+	if err := s.Store.RecordHeartbeat(now, hb.ID, raw, hb.Events); err != nil {
 		log.Printf("lỗi ghi log: %v", err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
+		http.Error(w, "storage error", http.StatusServiceUnavailable)
 		return
 	}
 	s.setLastHeartbeat(now, raw)
 
-	body := sched.render(now.In(vietnam).Format(time.DateOnly))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
@@ -220,53 +217,4 @@ func reasonText(r string) string {
 	default:
 		return "lý do không rõ"
 	}
-}
-
-// record ghi heartbeat nguyên bản vào heartbeats.jsonl và từng event vào events.jsonl.
-func (s *Server) record(now time.Time, id string, raw []byte, events []json.RawMessage) error {
-	at := now.In(vietnam).Format(time.RFC3339)
-	hbLine, err := json.Marshal(struct {
-		ReceivedAt string          `json:"received_at"`
-		Heartbeat  json.RawMessage `json:"heartbeat"`
-	}{at, raw})
-	if err != nil {
-		return err
-	}
-
-	var evLines []byte
-	for _, ev := range events {
-		var fields map[string]any
-		if err := json.Unmarshal(ev, &fields); err != nil {
-			fields = map[string]any{"raw": string(ev)}
-		}
-		fields["id"] = id
-		fields["received_at"] = at
-		line, err := json.Marshal(fields)
-		if err != nil {
-			return err
-		}
-		evLines = append(append(evLines, line...), '\n')
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := appendFile(filepath.Join(s.DataDir, "heartbeats.jsonl"), append(hbLine, '\n')); err != nil {
-		return err
-	}
-	if len(evLines) > 0 {
-		return appendFile(filepath.Join(s.DataDir, "events.jsonl"), evLines)
-	}
-	return nil
-}
-
-func appendFile(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +72,12 @@ var apiRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/schedule"},
 	{http.MethodPut, "/api/schedule"},
 	{http.MethodGet, "/api/events"},
+	{http.MethodGet, "/api/day"},
+	{http.MethodGet, "/api/weather"},
+	{http.MethodGet, "/api/settings"},
+	{http.MethodPut, "/api/settings"},
+	{http.MethodPost, "/api/settings/daily-from-slots"},
+	{http.MethodPost, "/api/sessions/1/cancel"},
 }
 
 func TestUIDisabledWithoutPassword(t *testing.T) {
@@ -262,9 +266,9 @@ func TestLogout(t *testing.T) {
 }
 
 func TestPutScheduleValid(t *testing.T) {
-	s, dir, _ := newUIServer(t, goodSchedule)
+	s, _, _ := newUIServer(t, goodSchedule)
 	c := mustLogin(t, s)
-	body := `{"daily":" 21600:600 , 64800 ","days":{"2026-11-12":"","2026-11-14":"30000:120"}}`
+	body := `{"daily":" 21600:600 , 64800 "}`
 	rec := do(s, http.MethodPut, "/api/schedule", body, withCookie(c), withHeader("Content-Type", "application/json; charset=utf-8"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d body %q", rec.Code, rec.Body.String())
@@ -273,25 +277,14 @@ func TestPutScheduleValid(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Daily != "21600:600,64800" || got.Days["2026-11-14"] != "30000:120" {
+	if got.Daily != "21600:600,64800" {
 		t.Errorf("response chưa chuẩn hoá: %+v", got)
 	}
-	onDisk, err := loadSchedule(filepath.Join(dir, "schedule.json"))
-	if err != nil {
-		t.Fatalf("file sau khi ghi: %v", err)
-	}
-	if onDisk.Daily != "21600:600,64800" || len(onDisk.Days) != 2 {
-		t.Errorf("file = %+v", onDisk)
-	}
-	// Ghi atomic: không để lại file tạm.
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if e.Name() != "schedule.json" {
-			t.Errorf("file thừa sau khi ghi: %s", e.Name())
-		}
+	if d, err := s.Store.Daily(); err != nil || d != "21600:600,64800" {
+		t.Errorf("DB = %q, %v", d, err)
 	}
 	// Thiết bị nhận lịch mới ngay ở heartbeat kế tiếp.
-	if rec := post(s, "Bearer "+testToken, sampleHeartbeat); rec.Body.String() != "21600:600,64800\n" {
+	if rec := post(s, "Bearer "+testToken, sampleHeartbeat); rec.Body.String() != "21600:600,64800" {
 		t.Errorf("thiết bị nhận %q", rec.Body.String())
 	}
 	if rec := do(s, http.MethodGet, "/api/schedule", "", withCookie(c)); !strings.Contains(rec.Body.String(), `"21600:600,64800"`) {
@@ -302,16 +295,15 @@ func TestPutScheduleValid(t *testing.T) {
 func TestPutScheduleInvalid(t *testing.T) {
 	cases := map[string]string{
 		"bad token":     `{"daily":"25200,abc"}`,
-		"empty daily":   `{"daily":"","days":{}}`,
+		"empty daily":   `{"daily":""}`,
 		"too many":      `{"daily":"` + strings.Repeat("60,", 20) + `60"}`,
-		"bad date":      `{"daily":"25200","days":{"12/11/2026":""}}`,
 		"unknown field": `{"daily":"25200","dayz":{}}`,
 		"not json":      `daily=25200`,
 		"trailing":      `{"daily":"25200"} {"daily":"1"}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			s, dir, _ := newUIServer(t, goodSchedule)
+			s, _, _ := newUIServer(t, goodSchedule)
 			c := mustLogin(t, s)
 			rec := do(s, http.MethodPut, "/api/schedule", body, withCookie(c), withHeader("Content-Type", "application/json"))
 			if rec.Code != http.StatusBadRequest {
@@ -321,18 +313,34 @@ func TestPutScheduleInvalid(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil || e.Error == "" {
 				t.Errorf("thiếu thông báo lỗi JSON: %q", rec.Body.String())
 			}
-			if strings.Contains(e.Error, dir) {
-				t.Errorf("thông báo lộ đường dẫn: %q", e.Error)
-			}
-			if b, _ := os.ReadFile(filepath.Join(dir, "schedule.json")); string(b) != goodSchedule {
-				t.Errorf("file bị đổi: %q", b)
+			if d, _ := s.Store.Daily(); d != goodSchedule {
+				t.Errorf("lịch bị đổi: %q", d)
 			}
 		})
 	}
 }
 
+func TestPutScheduleRejectsDays(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	c := mustLogin(t, s)
+	rec := do(s, http.MethodPut, "/api/schedule", `{"daily":"3600","days":{"2026-11-14":"30000:120"}}`,
+		withCookie(c), withHeader("Content-Type", "application/json"))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "/api/sessions") {
+		t.Errorf("code %d body %q", rec.Code, rec.Body.String())
+	}
+	if d, _ := s.Store.Daily(); d != goodSchedule {
+		t.Errorf("lịch bị đổi: %q", d)
+	}
+	// days rỗng vẫn được chấp nhận (UI cũ gửi kèm).
+	rec = do(s, http.MethodPut, "/api/schedule", `{"daily":"3600","days":{}}`,
+		withCookie(c), withHeader("Content-Type", "application/json"))
+	if rec.Code != http.StatusOK {
+		t.Errorf("days rỗng: code %d", rec.Code)
+	}
+}
+
 func TestPutScheduleRequiresJSONContentType(t *testing.T) {
-	s, dir, _ := newUIServer(t, goodSchedule)
+	s, _, _ := newUIServer(t, goodSchedule)
 	c := mustLogin(t, s)
 	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
 		rec := do(s, http.MethodPut, "/api/schedule", `{"daily":"3600"}`, withCookie(c), withHeader("Content-Type", ct))
@@ -340,23 +348,23 @@ func TestPutScheduleRequiresJSONContentType(t *testing.T) {
 			t.Errorf("content-type %q: code %d, want 415", ct, rec.Code)
 		}
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "schedule.json")); string(b) != goodSchedule {
-		t.Errorf("file bị đổi: %q", b)
+	if d, _ := s.Store.Daily(); d != goodSchedule {
+		t.Errorf("lịch bị đổi: %q", d)
 	}
 }
 
-func TestPutScheduleCreatesMissingFile(t *testing.T) {
-	s, dir, _ := newUIServer(t, "")
+func TestPutScheduleCreatesMissing(t *testing.T) {
+	s, _, _ := newUIServer(t, "")
 	c := mustLogin(t, s)
 	if rec := do(s, http.MethodGet, "/api/schedule", "", withCookie(c)); rec.Code != http.StatusNotFound {
-		t.Errorf("GET khi chưa có file: code %d, want 404", rec.Code)
+		t.Errorf("GET khi chưa có lịch: code %d, want 404", rec.Code)
 	}
 	rec := do(s, http.MethodPut, "/api/schedule", `{"daily":"25200"}`, withCookie(c), withHeader("Content-Type", "application/json"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d body %q", rec.Code, rec.Body.String())
 	}
-	if _, err := loadSchedule(filepath.Join(dir, "schedule.json")); err != nil {
-		t.Error(err)
+	if d, _ := s.Store.Daily(); d != "25200" {
+		t.Errorf("DB = %q", d)
 	}
 }
 
@@ -398,24 +406,24 @@ func TestEvents(t *testing.T) {
 }
 
 func TestEventsDefaultAndMaxLimit(t *testing.T) {
-	s, dir, _ := newUIServer(t, goodSchedule)
+	s, _, _ := newUIServer(t, goodSchedule)
 	c := mustLogin(t, s)
-	var b strings.Builder
-	for i := 0; i < 1200; i++ {
-		fmt.Fprintf(&b, `{"type":"start","n":%d}`+"\n", i)
+	evs := make([]json.RawMessage, 1200)
+	for i := range evs {
+		evs[i] = json.RawMessage(fmt.Sprintf(`{"type":"start","at":"%d","source":"normal"}`, i))
 	}
-	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(b.String()), 0o644); err != nil {
+	if err := s.Store.RecordHeartbeat(s.now(), testID, []byte(`{"id":"`+testID+`"}`), evs); err != nil {
 		t.Fatal(err)
 	}
-	count := func(q string) (int, float64) {
+	count := func(q string) (int, string) {
 		rec := do(s, http.MethodGet, "/api/events"+q, "", withCookie(c))
-		var evs []map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &evs); err != nil {
+		var got []map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
-		return len(evs), evs[0]["n"].(float64)
+		return len(got), got[0]["at"].(string)
 	}
-	if n, first := count(""); n != 100 || first != 1199 {
+	if n, first := count(""); n != 100 || first != "1199" {
 		t.Errorf("mặc định: %d events, đầu %v", n, first)
 	}
 	if n, _ := count("?limit=5000"); n != 1000 {
@@ -464,7 +472,7 @@ func TestStateOnlineOffline(t *testing.T) {
 	if st.Online || string(st.Heartbeat) != "null" || st.ReceivedAt != "" {
 		t.Errorf("chưa có heartbeat: %+v", st)
 	}
-	if st.Today != "2026-11-12" || st.TodayBody == nil || *st.TodayBody != "25200:900,61200\n28800" {
+	if st.Today != "2026-11-12" || st.TodayBody == nil || *st.TodayBody != "25200:900,61200" {
 		t.Errorf("lịch hôm nay: %+v", st)
 	}
 	if st.Schedule == nil || st.Schedule.Daily != "25200:900,61200" {
@@ -491,7 +499,7 @@ func TestStateOnlineOffline(t *testing.T) {
 }
 
 func TestStateScheduleError(t *testing.T) {
-	s, _, _ := newUIServer(t, `{"daily":"abc"}`)
+	s, _, _ := newUIServer(t, "")
 	c := mustLogin(t, s)
 	st := getState(t, s, c)
 	if st.Schedule != nil || st.ScheduleError == "" || st.TodayBody != nil {
@@ -499,14 +507,14 @@ func TestStateScheduleError(t *testing.T) {
 	}
 }
 
-func TestLoadLastHeartbeatFromFile(t *testing.T) {
-	s, dir, _ := newUIServer(t, goodSchedule)
-	big := strings.Repeat("x", 70<<10) // dài hơn một khối đọc
-	lines := []string{
-		`{"received_at":"2026-11-11T07:00:00+07:00","heartbeat":{"id":"old","pad":"` + big + `"}}`,
-		`{"received_at":"2026-11-12T07:50:00+07:00","heartbeat":{"id":"` + testID + `","fw":"0.2.0","pad":"` + big + `"}}`,
+func TestLoadLastHeartbeatFromDB(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	old := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 11, 12, 0, 50, 0, 0, time.UTC) // 07:50 giờ VN
+	if err := s.Store.RecordHeartbeat(old, "old", []byte(`{"id":"old"}`), nil); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "heartbeats.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	if err := s.Store.RecordHeartbeat(recent, testID, []byte(`{"id":"`+testID+`","fw":"0.2.0"}`), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.LoadLastHeartbeat(); err != nil {
@@ -523,52 +531,10 @@ func TestLoadLastHeartbeatFromFile(t *testing.T) {
 	}
 }
 
-func TestLoadLastHeartbeatMissingFile(t *testing.T) {
+func TestLoadLastHeartbeatEmptyDB(t *testing.T) {
 	s, _, _ := newUIServer(t, goodSchedule)
 	if err := s.LoadLastHeartbeat(); err != nil {
-		t.Errorf("chưa có file phải không lỗi: %v", err)
-	}
-}
-
-func TestTailLines(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "x.jsonl")
-	var all []string
-	for i := 0; i < 50; i++ {
-		all = append(all, strings.Repeat(fmt.Sprint(i%10), i%7+1))
-	}
-	if err := os.WriteFile(p, []byte(strings.Join(all, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, chunk := range []int{1, 3, 8, 1 << 16} {
-		for _, n := range []int{1, 5, 50, 80} {
-			got, err := tailLines(p, n, chunk)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := all
-			if n < len(all) {
-				want = all[len(all)-n:]
-			}
-			if len(got) != len(want) {
-				t.Fatalf("chunk %d n %d: %d dòng, want %d", chunk, n, len(got), len(want))
-			}
-			for i := range want {
-				// tailLines trả mới nhất trước.
-				if string(got[i]) != want[len(want)-1-i] {
-					t.Fatalf("chunk %d n %d: dòng %d = %q, want %q", chunk, n, i, got[i], want[len(want)-1-i])
-				}
-			}
-		}
-	}
-	// Dòng cuối chưa có \n (đang ghi dở) vẫn được trả; tệp không tồn tại ⇒ rỗng, không lỗi.
-	if err := os.WriteFile(p, []byte("a\nb"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := tailLines(p, 5, 2); len(got) != 2 || string(got[0]) != "b" {
-		t.Errorf("không \\n cuối: %q", got)
-	}
-	if got, err := tailLines(filepath.Join(t.TempDir(), "nope"), 5, 2); err != nil || len(got) != 0 {
-		t.Errorf("tệp thiếu: %q, %v", got, err)
+		t.Errorf("DB trống phải không lỗi: %v", err)
 	}
 }
 

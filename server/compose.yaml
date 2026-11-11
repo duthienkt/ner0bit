@@ -6,6 +6,6 @@ services:
     ports:
       - "127.0.0.1:8080:8080"   # chỉ máy này; public qua Cloudflare Tunnel / reverse proxy
     env_file: .env          # NER0BIT_TOKEN, NER0BIT_DEVICE_ID, NER0BIT_UI_PASSWORD (xem .env.example)
-    user: "${UID:-1000}:${GID:-1000}"   # trùng chủ thư mục ./data để sửa schedule.json từ máy host
+    user: "${UID:-1000}:${GID:-1000}"   # trùng chủ thư mục ./data để server ghi được DB (ner0bit.db) và đọc file cũ khi nhập lần đầu
     volumes:
       - ./data:/data

@@ -56,39 +56,34 @@ Gán chân tạm nằm trong `firmware/src/pins.h` (bảng trong [docs/system-de
 
 ## Server (Go)
 
-Nhận heartbeat của thiết bị, ghi log, trả lịch tưới. Lịch sửa trên giao diện web hoặc sửa tay trong `server/data/schedule.json` — server đọc lại mỗi request, không cần restart.
+Nhận heartbeat của thiết bị, trả lịch tưới, tự tính lịch hằng ngày theo mưa và nắng đo thật. Dữ liệu (heartbeat, event, lịch, số liệu mưa/nắng, sổ phút miễn) nằm trong một file **SQLite**: `NER0BIT_DB`, mặc định `$NER0BIT_DATA_DIR/ner0bit.db` (trong container là `/data/ner0bit.db`).
 
 ```bash
 cd server
-cp .env.example .env                                  # điền NER0BIT_TOKEN (+ NER0BIT_DEVICE_ID, NER0BIT_UI_PASSWORD)
-cp data/schedule.example.json data/schedule.json      # sửa lịch
-docker compose up -d --build                          # lắng nghe :8080 (HTTP)
-go test ./...                                         # test (cần Go 1.24+)
+cp .env.example .env              # điền NER0BIT_TOKEN (+ NER0BIT_DEVICE_ID, NER0BIT_UI_PASSWORD)
+docker compose up -d --build      # lắng nghe :8080 (HTTP)
+go test ./...                     # test (cần Go 1.24+)
 ```
 
-`schedule.json`:
-
-```json
-{"daily": "25200:900,61200", "days": {"2026-11-12": "", "2026-11-13": "28800"}}
-```
-
-- `daily`: dòng 1, lặp mỗi ngày (`<giây từ 0h>[:<giây tưới>]`, mặc định 300 giây).
-- `days`: lịch riêng theo ngày (giờ VN) — `""` = hôm đó không tưới, có mốc = thay `daily` trong ngày.
-- File sai ⇒ server trả 503, thiết bị giữ lịch cũ; lỗi ghi trong log container.
+- Lần đầu chạy với DB trống, server nhập một lần `schedule.json`, `heartbeats.jsonl`, `events.jsonl` cũ trong thư mục dữ liệu (nếu có) vào SQLite. Các file cũ được giữ nguyên nhưng không còn được đọc/ghi. `data/schedule.example.json` chỉ là mẫu định dạng `schedule.json` cũ cho lần nhập này; lịch giờ sửa trên giao diện web.
+- Chưa có lịch dự phòng ⇒ server trả 503, thiết bị giữ lịch cũ; đặt lịch trên giao diện web là có hiệu lực ngay.
+- **Lịch tự động mặc định tắt**: thiết bị tưới theo lịch dự phòng (dòng 1) như trước. Bật ở mục "Thiết lập tự động" trên giao diện web; từ đó server lấy mưa trạm Vrain Đỗ Xuân Hợp và METAR Tân Sơn Nhất mỗi giờ (phút :09), chốt từng lần tưới 6 phút trước giờ tưới. Server cần ra được Internet (`data.vrain.vn`, `aviationweather.gov`).
+- Thuật toán, tham số và cách sinh 2 dòng lịch: [docs/system-design.md](docs/system-design.md), mục "Server: lịch tưới tự động".
 
 ### Giao diện web
 
 Mở URL server bằng trình duyệt (điện thoại hoặc máy tính), đăng nhập bằng `NER0BIT_UI_PASSWORD`:
 
 - Trạng thái thiết bị: online (heartbeat ≤ 15 phút), bơm bật/tắt, nhiệt độ, WiFi, bộ nhớ, module DS3231/AT24C32, hàng đợi event, giờ thiết bị.
-- Dải 24 giờ hôm nay: các mốc theo lịch server trả và các lần bơm chạy thật (từ events).
-- Sửa lịch hằng ngày và lịch riêng theo ngày (hoặc "không tưới"), có cảnh báo mốc > 30 phút (bị cắt) và mốc sẽ bị bỏ vì chưa nghỉ đủ 10 phút. Lưu là ghi thẳng `schedule.json` (atomic).
-- "Tưới thử": thêm mốc 5 phút cho hôm nay sau N phút (mặc định 7) rồi lưu ngay. Thiết bị nhận lịch ở heartbeat kế tiếp (≤ 5 phút).
+- **Hôm nay**: dải 24 giờ (lịch server trả và các lần bơm chạy thật), mỗi lần tưới một hàng kèm lý do (ví dụ "mưa 6.2 mm từ 19h ⇒ miễn 11 phút; tưới 4 phút"), lần chưa chốt in nghiêng; nút "Huỷ" cho lần tự động; mưa và nhiệt độ 48 giờ qua; "Tưới thử" thêm phiên 5 phút sau N phút (mặc định 7).
+- **Lịch tưới**: xem từng ngày (cả ngày đã qua), thêm/xoá phiên bơm thử, cảnh báo phiên quá sát nhau.
+- **Thiết lập tự động**: bật/tắt, các lần tưới (giờ + buổi), block, ngưỡng mưa, `min_run`, `carry_max`, `e_ref`. Lịch dự phòng khác lịch tự động thì có nút đặt lại cho khớp.
+- **Lịch dự phòng**: sửa dòng 1, có cảnh báo mốc > 30 phút (bị cắt) và mốc sẽ bị bỏ vì chưa nghỉ đủ 3 phút.
 - Hoạt động gần đây: bật/tắt/bỏ mốc, nguồn, lý do. Trang tự làm mới mỗi 15 giây.
 
-`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP; `NER0BIT_TRUST_CF_HEADER=1` ⇒ lấy IP thật từ `CF-Connecting-IP` — chỉ bật khi server chỉ nhận request qua Cloudflare Tunnel) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/events?limit=N`.
+`NER0BIT_UI_PASSWORD` trống ⇒ UI tắt (thiết bị vẫn chạy bình thường). Phiên đăng nhập là cookie ký HMAC, hạn 30 ngày, `Secure` — nên phải mở qua `https://` (Cloudflare Tunnel / reverse proxy) hoặc `http://localhost`; qua `http://<IP LAN>` trình duyệt không lưu cookie. Sai mật khẩu 5 lần trong 10 phút (theo IP; `NER0BIT_TRUST_CF_HEADER=1` ⇒ lấy IP thật từ `CF-Connecting-IP` — chỉ bật khi server chỉ nhận request qua Cloudflare Tunnel) ⇒ khoá 10 phút. API JSON cho UI: `GET /api/state`, `GET|PUT /api/schedule`, `GET /api/day`, `POST /api/sessions`, `DELETE /api/sessions/{id}`, `POST /api/sessions/{id}/cancel`, `GET /api/weather`, `GET|PUT /api/settings`, `POST /api/settings/daily-from-slots`, `GET /api/events?limit=N` (bảng trong [docs/system-design.md](docs/system-design.md)).
 
-Log: `data/heartbeats.jsonl`, `data/events.jsonl` (mỗi dòng một JSON). Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
+Server chỉ nói HTTP — HTTPS do Cloudflare Tunnel hoặc reverse proxy lo; Server URL trên thiết bị là URL public `https://...`.
 
 ## Chạy code thử nghiệm
 
@@ -107,5 +102,5 @@ Cổng nạp cấu hình cho macOS (`/dev/cu.usbmodem*` trong `platformio.ini`).
 
 ## Trạng thái triển khai
 
-Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware đã viết xong (`firmware/`): scheduler bơm, event queue trên AT24C32 (hoặc RAM khi không có module), heartbeat HTTPS + NTP, setup portal. Mới kiểm chứng bằng unit test (`pio test -e native`) và build — **chưa chạy thử trên phần cứng** (đang chờ linh kiện để dựng mạch). Server Go (`server/`) đã có bản cơ bản kèm giao diện web xem trạng thái, sửa lịch; module thời tiết viết sau.
+Thiết kế đã chốt ([docs/system-design.md](docs/system-design.md)). Firmware (`firmware/`): scheduler bơm, event queue trên AT24C32 (hoặc RAM khi không có module), heartbeat HTTPS + NTP, setup portal. **Thiết bị đang chạy thật** (ESP32-C3, fw 0.2.0), bơm cho chậu cây ngoài trời, nhận lịch từ server tại https://irri.thuanle.me. Server Go (`server/`): SQLite, giao diện web, lịch tưới tự động theo mưa Vrain và nắng METAR (mặc định tắt, bật trên giao diện web).
 
