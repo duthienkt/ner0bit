@@ -110,17 +110,14 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	// Đọc lịch TRƯỚC khi ghi log: lỗi DB hoặc chưa có lịch ⇒ 503, ESP giữ events và gửi lại sau,
 	// nên lúc này không ghi để tránh trùng.
-	body, err := s.Store.Daily()
-	if err == nil && body == "" {
-		err = errScheduleMissing
-	}
+	now := s.now()
+	body, err := s.deviceBody(now)
 	if err != nil {
 		log.Printf("lỗi lịch: %v", err)
 		http.Error(w, "schedule unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	now := s.now()
 	if err := s.Store.RecordHeartbeat(now, hb.ID, raw, hb.Events); err != nil {
 		log.Printf("lỗi ghi log: %v", err)
 		http.Error(w, "storage error", http.StatusServiceUnavailable)

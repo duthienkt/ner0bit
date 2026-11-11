@@ -30,6 +30,8 @@ import (
 //	GET  /api/state     heartbeat cuối + online + lịch hiện hành + body lịch trả hôm nay
 //	GET  /api/schedule
 //	PUT  /api/schedule  JSON {"daily": "..."}, lưu vào SQLite
+//	POST /api/sessions  JSON {"date","start_s","run_s","note"} ⇒ thêm phiên bơm thử (manual)
+//	DELETE /api/sessions/{id}  xoá phiên manual
 //	GET  /api/events    ?limit=N (mặc định 100, tối đa 1000), mới nhất trước
 //
 // Mọi request POST khác vẫn là heartbeat của thiết bị (Bearer token), như trước.
@@ -68,6 +70,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/state", s.api(s.handleState))
 	mux.HandleFunc("GET /api/schedule", s.api(s.handleGetSchedule))
 	mux.HandleFunc("PUT /api/schedule", s.api(s.handlePutSchedule))
+	mux.HandleFunc("POST /api/sessions", s.api(s.handleAddSession))
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.api(s.handleDeleteSession))
 	mux.HandleFunc("GET /api/events", s.api(s.handleEvents))
 	return mux
 }
@@ -398,8 +402,11 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		resp.ScheduleError = err.Error()
 	} else {
 		resp.Schedule = sched
-		body := sched.Daily
-		resp.TodayBody = &body
+		if body, err := s.deviceBody(now); err != nil {
+			resp.ScheduleError = err.Error()
+		} else {
+			resp.TodayBody = &body
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -427,12 +434,12 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "Lịch quá lớn.")
 		return
 	}
-	sched, err := parseSchedule(raw)
+	sched, hasDays, err := parseSchedule(raw)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Lịch không hợp lệ: "+err.Error())
 		return
 	}
-	if len(sched.Days) > 0 {
+	if hasDays {
 		writeJSONError(w, http.StatusBadRequest, "Lịch riêng theo ngày đã chuyển sang /api/sessions.")
 		return
 	}

@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Giới hạn khớp firmware (docs/system-design.md, "Quy tắc parse ở ESP").
@@ -17,61 +15,35 @@ const (
 	secondsPerDay     = 86400
 )
 
-// Schedule là nội dung data/schedule.json.
-//
-//	{"daily": "25200:900,61200", "days": {"2026-11-12": "", "2026-11-13": "28800"}}
-//
-// daily = dòng 1 (lặp mỗi ngày). days[YYYY-MM-DD giờ VN] = dòng 2 cho đúng ngày đó:
-// "" ⇒ hôm đó không tưới; không có key ⇒ không gửi dòng 2 (ESP dùng dòng 1).
+// Schedule là lịch dự phòng (dòng 1) lặp mỗi ngày, ví dụ {"daily": "25200:900,61200"}.
+// Lịch riêng từng ngày nằm ở bảng sessions (calendar.go).
 type Schedule struct {
-	Daily string            `json:"daily"`
-	Days  map[string]string `json:"days,omitempty"`
+	Daily string `json:"daily"`
 }
 
-// loadSchedule đọc và kiểm tra chặt file lịch; mọi lỗi đều trả về (server không đoán).
-// Các dòng được chuẩn hoá về dạng canonical (không khoảng trắng).
-func loadSchedule(path string) (*Schedule, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+// parseSchedule kiểm tra body PUT /api/schedule. days (định dạng cũ) được nhận để báo lỗi
+// rõ ràng: hasDays=true khi nó khác rỗng.
+func parseSchedule(raw []byte) (s *Schedule, hasDays bool, err error) {
+	var req struct {
+		Daily string            `json:"daily"`
+		Days  map[string]string `json:"days"`
 	}
-	s, err := parseSchedule(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return s, nil
-}
-
-// parseSchedule kiểm tra nội dung JSON của lịch (dùng chung cho file và PUT /api/schedule).
-func parseSchedule(raw []byte) (*Schedule, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var s Schedule
-	if err := dec.Decode(&s); err != nil {
-		return nil, fmt.Errorf("JSON sai: %w", err)
+	if err := dec.Decode(&req); err != nil {
+		return nil, false, fmt.Errorf("JSON sai: %w", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("JSON sai: thừa dữ liệu sau lịch")
+		return nil, false, fmt.Errorf("JSON sai: thừa dữ liệu sau lịch")
 	}
-	daily, err := normalizeLine(s.Daily)
+	daily, err := normalizeLine(req.Daily)
 	if err != nil {
-		return nil, fmt.Errorf("daily: %w", err)
+		return nil, false, fmt.Errorf("daily: %w", err)
 	}
 	if daily == "" {
-		return nil, fmt.Errorf("daily phải có ít nhất 1 mốc")
+		return nil, false, fmt.Errorf("daily phải có ít nhất 1 mốc")
 	}
-	s.Daily = daily
-	for date, line := range s.Days {
-		if _, err := time.Parse(time.DateOnly, date); err != nil {
-			return nil, fmt.Errorf("days: ngày %q phải dạng YYYY-MM-DD", date)
-		}
-		norm, err := normalizeLine(line)
-		if err != nil {
-			return nil, fmt.Errorf("days[%s]: %w", date, err)
-		}
-		s.Days[date] = norm
-	}
-	return &s, nil
+	return &Schedule{Daily: daily}, len(req.Days) > 0, nil
 }
 
 // normalizeLine kiểm tra một dòng "<giây>[:<duration>],..." và trả dạng canonical.
@@ -123,12 +95,4 @@ func parseUint(s string) (uint64, error) {
 		}
 	}
 	return strconv.ParseUint(s, 10, 32)
-}
-
-// render sinh body response cho ngày date (YYYY-MM-DD giờ VN).
-func (s *Schedule) render(date string) string {
-	if line2, ok := s.Days[date]; ok {
-		return s.Daily + "\n" + line2
-	}
-	return s.Daily
 }
