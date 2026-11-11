@@ -66,15 +66,16 @@ type VrainClient struct {
 
 // Fetch tải và phân tích; DataTS lấy từ Last-Modified (thiếu ⇒ lỗi).
 func (c *VrainClient) Fetch(ctx context.Context) (RainSnapshot, error) {
-	if c.HTTP == nil {
-		c.HTTP = &http.Client{Timeout: 15 * time.Second}
+	hc := c.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 15 * time.Second}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
 		return RainSnapshot{}, fmt.Errorf("tạo request Vrain: %w", err)
 	}
 	req.Header.Set("User-Agent", "ner0bit-server")
-	resp, err := c.HTTP.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return RainSnapshot{}, fmt.Errorf("gọi Vrain: %w", err)
 	}

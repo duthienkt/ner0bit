@@ -35,7 +35,7 @@ var schemaV1 = []string{
 		fetched_at TEXT NOT NULL,
 		vday TEXT NOT NULL,
 		sum_depth REAL NOT NULL,
-		level REAL)`,
+		level TEXT)`,
 	`CREATE INDEX rain_snapshots_vday ON rain_snapshots(vday)`,
 	`CREATE TABLE metar_obs (
 		obs_time TEXT PRIMARY KEY,
