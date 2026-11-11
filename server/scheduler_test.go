@@ -630,3 +630,102 @@ func TestDeviceBodyAutoOnExcludesSkippedAndCancelled(t *testing.T) {
 		t.Errorf("body %q err %v, muốn dòng 2 rỗng", body, err)
 	}
 }
+
+func TestAddManualCapCountsAutoSlots(t *testing.T) {
+	// Daily 1 mốc, tự động bật 3 lần: dòng 2 = 3 lần auto + manual phải ≤ 20 (firmware cắt ở 20).
+	s, _ := newTestServer(t, "18900:900")
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	added := 0
+	var err error
+	for i := 0; i < 19; i++ {
+		if _, err = s.Store.AddManualSession("2026-11-12", 30000+i*1200, 60, ""); err != nil {
+			break
+		}
+		added++
+	}
+	var se *errSession
+	if added != 17 || !errors.As(err, &se) {
+		t.Fatalf("thêm được %d phiên (err %v), muốn 17 rồi bị từ chối bằng *errSession", added, err)
+	}
+	body, err := s.deviceBody(vt("2026-11-12", "00:05"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, line2, _ := strings.Cut(body, "\n")
+	if n := len(strings.Split(line2, ",")); n != 20 {
+		t.Errorf("dòng 2 có %d mốc, muốn 20: %q", n, line2)
+	}
+}
+
+func TestSchedulerWarnsVrainLateAt11(t *testing.T) {
+	// Vrain kẹt ở bản 09:07 suốt 10:09–10:11 ⇒ đúng một cảnh báo "Vrain trễ" cho lượt 10h (kể cả tắt tự động).
+	st := openTestStore(t)
+	clock := vt("2026-11-10", "09:00")
+	rain := &fakeRain{now: &clock, snaps: hourlySnaps(vt("2026-11-10", "08:07"), vt("2026-11-10", "09:07"),
+		func(time.Time) float64 { return 0 })}
+	sc := &Scheduler{Store: st, Rain: rain, Now: func() time.Time { return clock }}
+	runTicks(t, sc, &clock, vt("2026-11-10", "09:00"), vt("2026-11-10", "10:10"))
+	if n := warningsLike(t, st, "Vrain trễ"); n != 0 {
+		t.Fatalf("%d cảnh báo trước 10:11, muốn 0", n)
+	}
+	runTicks(t, sc, &clock, vt("2026-11-10", "10:11"), vt("2026-11-10", "10:30"))
+	if n := warningsLike(t, st, "Vrain trễ: chưa có bản 10:07"); n != 1 {
+		t.Errorf("%d cảnh báo Vrain trễ 10:07, muốn 1", n)
+	}
+}
+
+func TestSchedulerLateWarningNamesExpectedHour(t *testing.T) {
+	// Slot 05:14 chốt lúc 05:08 (trước :09): bản cần có là 04:07; thiếu ⇒ cảnh báo nhắc "04:07", không phải "05:07".
+	st := openTestStore(t)
+	p := DefaultParams()
+	p.AutoEnabled, p.AutoEnabledAt = true, vt("2026-11-01", "00:00")
+	p.Slots = []Slot{{5*3600 + 14*60, "am"}}
+	if err := st.SetParams(p); err != nil {
+		t.Fatal(err)
+	}
+	clock := vt("2026-11-10", "05:08")
+	st.InsertRainSnapshot(RainSnapshot{DataTS: vt("2026-11-10", "03:07"), FetchedAt: vt("2026-11-10", "03:09")})
+	sc := &Scheduler{Store: st, Now: func() time.Time { return clock }}
+	runTicks(t, sc, &clock, clock, clock)
+	if n := warningsLike(t, st, "chưa có bản 04:07"); n != 1 {
+		t.Errorf("%d cảnh báo nhắc bản 04:07, muốn 1", n)
+	}
+}
+
+func TestWarnOnceRetriesAfterFailedWrite(t *testing.T) {
+	st := openTestStore(t)
+	sc := &Scheduler{Store: st}
+	now := vt("2026-11-10", "10:09")
+	st.Close()
+	if err := sc.warnOnce(now, "vrain", "thử"); err == nil {
+		t.Fatal("ghi cảnh báo vào DB đã đóng mà không lỗi")
+	}
+	st2, err := OpenStore(t.TempDir() + "/t2.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st2.Close()
+	sc.Store = st2
+	if err := sc.warnOnce(now, "vrain", "thử"); err != nil {
+		t.Fatal(err)
+	}
+	if n := warningsLike(t, st2, "thử"); n != 1 {
+		t.Errorf("lần ghi trước lỗi thì giờ đó phải được ghi lại; có %d", n)
+	}
+}
+
+func TestCloseDayUpdatesExistingNextRow(t *testing.T) {
+	st := openTestStore(t)
+	p := DefaultParams()
+	d, l := decide(Ledger{VDay: "2026-11-03"}, p.Slots[0], 6, 1, p)
+	if err := st.SaveDecision("2026-11-03", d, l, stateFinal, vt("2026-11-03", "05:09")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CloseDay("2026-11-02", 17.8, 1800, vt("2026-11-02", "20:12")); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.Ledger("2026-11-03")
+	if err != nil || !ok || got.CarryInS != 1800 || got.UsedRainS != l.UsedRainS {
+		t.Errorf("sổ 03/11 = %+v %v %v, muốn carry 1800, used_rain %v giữ nguyên", got, ok, err, l.UsedRainS)
+	}
+}

@@ -9,10 +9,18 @@ import (
 	"time"
 )
 
+// querier là phần đọc chung của *sql.DB và *sql.Tx (đọc nhiều bảng trong một ảnh chụp).
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Ledger trả sổ phút miễn của ngày Vrain vday. Chưa có dòng ⇒ sổ rỗng (carry 0), found=false.
-func (s *Store) Ledger(vday string) (Ledger, bool, error) {
+func (s *Store) Ledger(vday string) (Ledger, bool, error) { return ledgerQ(s.db, vday) }
+
+func ledgerQ(q querier, vday string) (Ledger, bool, error) {
 	l := Ledger{VDay: vday}
-	err := s.db.QueryRow(`SELECT carry_in, used_carry, used_rain, used_sun FROM days WHERE vday = ?`, vday).
+	err := q.QueryRow(`SELECT carry_in, used_carry, used_rain, used_sun FROM days WHERE vday = ?`, vday).
 		Scan(&l.CarryInS, &l.UsedCarryS, &l.UsedRainS, &l.UsedSunS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return l, false, nil
@@ -193,13 +201,31 @@ func decideAt(date string, slot Slot) (time.Time, error) {
 	return d.Add(time.Duration(slot.StartS-decideLeadS) * time.Second), nil
 }
 
-// Provisional trả bản tạm (§4.3) cho các lần chưa chốt của ngày date tính tới now: sổ của
-// ngày Vrain date, mưa mới nhất (không có ⇒ 0 mm), giả định S = 1. Lần có giờ chốt trước lúc
-// bật tự động bị bỏ qua vì scheduler sẽ ghi "bỏ" cho lần đó.
+// Provisional trả bản tạm (§4.3) cho các lần chưa chốt của ngày date tính tới now (xem dayPlan).
 func (s *Store) Provisional(date string, now time.Time, p Params) ([]Decision, error) {
-	decided, err := s.Decided(date)
+	_, prov, err := s.dayPlan(date, now, p)
+	return prov, err
+}
+
+// dayPlan đọc trong một transaction (một ảnh chụp, không lẫn với lần chốt đang ghi) mọi phiên của
+// ngày date và tính bản tạm cho các lần chưa chốt: sổ của ngày Vrain date, mưa mới nhất (không có
+// ⇒ 0 mm), giả định S = 1. Lần có giờ chốt trước lúc bật tự động bị bỏ qua vì scheduler sẽ ghi
+// "bỏ" cho lần đó.
+func (s *Store) dayPlan(date string, now time.Time, p Params) ([]Session, []Decision, error) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("đọc lịch ngày %s: %w", date, err)
+	}
+	defer tx.Rollback() // chỉ đọc
+	ss, err := sessionsQ(tx, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	decided := map[int]bool{}
+	for _, x := range ss {
+		if x.Source == sessionAuto {
+			decided[x.StartS] = true
+		}
 	}
 	var pending []Slot
 	for _, sl := range sortedSlots(p.Slots) {
@@ -208,7 +234,7 @@ func (s *Store) Provisional(date string, now time.Time, p Params) ([]Decision, e
 		}
 		at, err := decideAt(date, sl)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if at.Before(p.AutoEnabledAt) {
 			continue
@@ -216,17 +242,17 @@ func (s *Store) Provisional(date string, now time.Time, p Params) ([]Decision, e
 		pending = append(pending, sl)
 	}
 	if len(pending) == 0 {
-		return nil, nil
+		return ss, nil, nil
 	}
-	l, _, err := s.Ledger(date)
+	l, _, err := ledgerQ(tx, date)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sum := 0.0
-	if r, ok, err := s.LatestRain(date, now); err != nil {
-		return nil, err
+	if r, ok, err := latestRainQ(tx, date, now); err != nil {
+		return nil, nil, err
 	} else if ok {
 		sum = r.SumDepthMM
 	}
-	return provisional(l, pending, sum, p), nil
+	return ss, provisional(l, pending, sum, p), nil
 }

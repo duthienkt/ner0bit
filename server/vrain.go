@@ -146,7 +146,11 @@ func scanRain(sc interface{ Scan(...any) error }) (RainSnapshot, error) {
 
 // LatestRain trả snapshot mới nhất của vday có data_ts <= upTo.
 func (s *Store) LatestRain(vday string, upTo time.Time) (RainSnapshot, bool, error) {
-	row := s.db.QueryRow(`SELECT data_ts, fetched_at, sum_depth, level FROM rain_snapshots
+	return latestRainQ(s.db, vday, upTo)
+}
+
+func latestRainQ(q querier, vday string, upTo time.Time) (RainSnapshot, bool, error) {
+	row := q.QueryRow(`SELECT data_ts, fetched_at, sum_depth, level FROM rain_snapshots
 		WHERE vday = ? AND data_ts <= ? ORDER BY data_ts DESC LIMIT 1`,
 		vday, upTo.In(vietnam).Format(time.RFC3339))
 	r, err := scanRain(row)

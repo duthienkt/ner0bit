@@ -90,18 +90,22 @@ func (sc *Scheduler) Tick(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// warnOnce log lỗi thu thập và ghi cảnh báo, mỗi nguồn tối đa một lần mỗi giờ.
+// warnOnce log lỗi thu thập/Vrain trễ và ghi cảnh báo, mỗi nguồn tối đa một lần mỗi giờ (ghi
+// lỗi thì lần sau trong giờ thử ghi lại).
 func (sc *Scheduler) warnOnce(now time.Time, source, msg string) error {
 	log.Printf("CẢNH BÁO: %s", msg)
 	hour := now.Format("2006-01-02 15")
-	if sc.warnedAt == nil {
-		sc.warnedAt = map[string]string{}
-	}
 	if sc.warnedAt[source] == hour {
 		return nil
 	}
+	if err := sc.Store.AddWarning(now, source, msg); err != nil {
+		return err
+	}
+	if sc.warnedAt == nil {
+		sc.warnedAt = map[string]string{}
+	}
 	sc.warnedAt[source] = hour
-	return sc.Store.AddWarning(now, source, msg)
+	return nil
 }
 
 // warn log và ghi cảnh báo.
@@ -110,22 +114,28 @@ func (sc *Scheduler) warn(now time.Time, source, msg string) error {
 	return sc.Store.AddWarning(now, source, msg)
 }
 
-// haveFreshRain: đã có snapshot Vrain mới nhất có thể có lúc now, tức bản :07 của giờ hiện tại
-// (từ phút :09), hoặc của giờ trước (phút :00–:08).
-func (sc *Scheduler) haveFreshRain(now time.Time) (bool, error) {
+// freshRainHour là giờ của bản Vrain mới nhất có thể có lúc now: giờ hiện tại từ phút :09,
+// giờ trước trong phút :00–:08 (Vrain ra bản lúc :07).
+func freshRainHour(now time.Time) time.Time {
 	want := now.Truncate(time.Hour)
 	if now.Minute() < collectMinute {
 		want = want.Add(-time.Hour)
 	}
+	return want
+}
+
+// haveFreshRain: đã có bản Vrain của giờ freshRainHour(now).
+func (sc *Scheduler) haveFreshRain(now time.Time) (bool, error) {
 	r, ok, err := sc.Store.rainUpTo(now)
 	if err != nil || !ok {
 		return false, err
 	}
-	return !r.DataTS.Before(want), nil
+	return !r.DataTS.Before(freshRainHour(now)), nil
 }
 
-// collect lấy Vrain ở phút 9–11 khi còn thiếu snapshot giờ hiện tại, METAR mỗi giờ từ phút 9.
-// Lỗi mạng/dữ liệu hỏng chỉ cảnh báo, không ghi gì; chỉ trả lỗi DB.
+// collect lấy Vrain ở phút 9–11 khi còn thiếu snapshot giờ hiện tại (tới :11 vẫn thiếu ⇒ giữ
+// snapshot cũ, cảnh báo "Vrain trễ"), METAR mỗi giờ từ phút 9. Lỗi mạng/dữ liệu hỏng chỉ cảnh
+// báo, không ghi gì; chỉ trả lỗi DB. Cảnh báo lỗi Vrain và Vrain trễ chung hạn mức một lần mỗi giờ.
 func (sc *Scheduler) collect(ctx context.Context, now time.Time) error {
 	m := now.Minute()
 	var errs []error
@@ -135,6 +145,14 @@ func (sc *Scheduler) collect(ctx context.Context, now time.Time) error {
 			errs = append(errs, err)
 		} else if !have {
 			errs = append(errs, sc.fetchRain(ctx, now))
+			if m == vrainLastMinute {
+				if have, err := sc.haveFreshRain(now); err != nil {
+					errs = append(errs, err)
+				} else if !have {
+					errs = append(errs, sc.warnOnce(now, "vrain",
+						fmt.Sprintf("Vrain trễ: chưa có bản %02d:07 lúc %s, giữ snapshot cũ", now.Hour(), now.Format("15:04"))))
+				}
+			}
 		}
 	}
 	if hour := now.Format("2006-01-02 15"); sc.Metar != nil && m >= collectMinute && sc.metarHour != hour {
@@ -258,9 +276,9 @@ func (sc *Scheduler) decideDue(now time.Time, p Params, today string) error {
 				return nil // chờ Vrain tới :11
 			}
 			msg := fmt.Sprintf("Vrain trễ: chốt lần %s ngày %s khi chưa có bản %02d:07, dùng snapshot cũ",
-				hms(slot.StartS), today, now.Hour())
+				hms(slot.StartS), today, freshRainHour(now).Hour())
 			notes = append(notes, msg)
-			if err := sc.warn(now, "vrain", msg); err != nil {
+			if err := sc.warnOnce(now, "vrain", msg); err != nil {
 				return err
 			}
 		}

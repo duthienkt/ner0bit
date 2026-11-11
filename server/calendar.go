@@ -83,8 +83,9 @@ func parseLineEntries(line string) []entry {
 	return es
 }
 
-// AddManualSession lưu một phiên bơm thử. Kiểm tra giới hạn dữ liệu và số mốc của dòng 2
-// (daily + các phiên manual còn hiệu lực + phiên mới ≤ maxEntriesPerLine); sai ⇒ *errSession.
+// AddManualSession lưu một phiên bơm thử. Kiểm tra giới hạn dữ liệu và số mốc của dòng 2:
+// max(mốc daily, số lần tự động) + các phiên manual còn hiệu lực + phiên mới ≤ maxEntriesPerLine,
+// để dòng 2 không vượt giới hạn firmware dù tự động bật hay tắt (lúc thêm hay về sau); sai ⇒ *errSession.
 func (s *Store) AddManualSession(date string, startS, runS int, note string) (Session, error) {
 	if _, err := time.Parse(time.DateOnly, date); err != nil {
 		return Session{}, &errSession{"Ngày phải dạng YYYY-MM-DD."}
@@ -95,12 +96,21 @@ func (s *Store) AddManualSession(date string, startS, runS int, note string) (Se
 	if runS < manualRunMinS || runS > manualRunMaxS {
 		return Session{}, &errSession{fmt.Sprintf("Thời lượng phải trong khoảng %d–%d giây.", manualRunMinS, manualRunMaxS)}
 	}
-	es, err := s.dayEntries(date)
+	daily, err := s.Daily()
 	if err != nil {
 		return Session{}, err
 	}
-	if len(es)+1 > maxEntriesPerLine {
-		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc.", date, maxEntriesPerLine)}
+	p, err := s.Params()
+	if err != nil {
+		return Session{}, err
+	}
+	man, err := s.manualEntries(date)
+	if err != nil {
+		return Session{}, err
+	}
+	if base := max(len(parseLineEntries(daily)), len(p.Slots)); base+len(man)+1 > maxEntriesPerLine {
+		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc daily/tự động + %d phiên bơm thử).",
+			date, maxEntriesPerLine, base, len(man))}
 	}
 	now := time.Now().In(vietnam)
 	id, err := insertManualSessionRaw(s.db, date, startS, runS, note, now)
@@ -148,8 +158,10 @@ func (s *Store) DeleteManualSession(id int64) error {
 }
 
 // Sessions trả mọi phiên của ngày date (kể cả đã xoá), theo giờ bắt đầu rồi id.
-func (s *Store) Sessions(date string) ([]Session, error) {
-	rows, err := s.db.Query(`SELECT id, date, start_s, run_s, source, state, COALESCE(vday, ''), slot_s, note, reason, created_at
+func (s *Store) Sessions(date string) ([]Session, error) { return sessionsQ(s.db, date) }
+
+func sessionsQ(q querier, date string) ([]Session, error) {
+	rows, err := q.Query(`SELECT id, date, start_s, run_s, source, state, COALESCE(vday, ''), slot_s, note, reason, created_at
 		FROM sessions WHERE date = ? ORDER BY start_s, id`, date)
 	if err != nil {
 		return nil, fmt.Errorf("đọc phiên: %w", err)
@@ -259,7 +271,7 @@ func (srv *Server) deviceBody(now time.Time) (string, error) {
 
 // autoDayEntries là dòng 2 của ngày date khi bật tự động (xem deviceBody).
 func (s *Store) autoDayEntries(date string, now time.Time, p Params) ([]entry, error) {
-	ss, err := s.Sessions(date)
+	ss, prov, err := s.dayPlan(date, now, p)
 	if err != nil {
 		return nil, err
 	}
@@ -270,10 +282,6 @@ func (s *Store) autoDayEntries(date string, now time.Time, p Params) ([]entry, e
 			x.Source == sessionManual && x.State != stateDeleted:
 			es = append(es, entry{x.StartS, x.RunS})
 		}
-	}
-	prov, err := s.Provisional(date, now, p)
-	if err != nil {
-		return nil, err
 	}
 	for _, d := range prov {
 		if d.RunS > 0 {
