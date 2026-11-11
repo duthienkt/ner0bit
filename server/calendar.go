@@ -145,7 +145,7 @@ func (s *Store) AddManualSession(date string, startS, runS int, note string) (Se
 		return Session{}, err
 	}
 	if base, n := lineBase(daily, p, ss, nil), manualCount(ss); base+n+1 > maxEntriesPerLine {
-		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc daily/tự động + %d phiên bơm thử).",
+		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc lịch nền + %d phiên bơm thử).",
 			date, maxEntriesPerLine, base, n)}
 	}
 	now := time.Now().In(vietnam)
@@ -355,7 +355,7 @@ func bodyOf(daily string, auto bool, ss []Session, prov []Decision) (body string
 	line1 := daily
 	if d := parseLineEntries(daily); len(d) > maxEntriesPerLine {
 		line1 = renderLine(capEntries(d))
-		warns = append(warns, fmt.Sprintf("Lịch dự phòng có %d mốc, vượt %d: chỉ gửi %d mốc sớm nhất.",
+		warns = append(warns, fmt.Sprintf("Lịch thủ công có %d mốc, vượt %d: chỉ gửi %d mốc sớm nhất.",
 			len(d), maxEntriesPerLine, maxEntriesPerLine))
 	}
 	es, hasManual := lineEntries(daily, auto, ss, prov)

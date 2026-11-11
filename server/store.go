@@ -208,7 +208,7 @@ func (s *Store) SetDaily(line string) error {
 		return err
 	}
 	if norm == "" {
-		return fmt.Errorf("lịch dự phòng phải có ít nhất 1 mốc")
+		return fmt.Errorf("lịch thủ công phải có ít nhất 1 mốc")
 	}
 	_, err = s.db.Exec(`INSERT INTO schedule_daily(id, line, updated_at) VALUES(1, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET line=excluded.line, updated_at=excluded.updated_at`,
