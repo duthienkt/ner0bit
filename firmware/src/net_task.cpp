@@ -380,8 +380,9 @@ bool heartbeat() {
                              (s_sched.l2 != Line2State::Missing && fetchDay != s_lastDay);
         strlcpy(s_lastBody, s_body, sizeof s_lastBody);
         s_lastDay = fetchDay;
-        nlog("[net] 200: lịch %s (day %lu), queue còn %u\n",
-                      changed ? "MỚI" : "không đổi", (unsigned long)fetchDay, (unsigned)remaining);
+        nlog(changed ? "[net] 200: 🗓️ lịch MỚI (day %lu), queue còn %u\n"
+                     : "[net] 200: lịch không đổi (day %lu), queue còn %u\n",
+             (unsigned long)fetchDay, (unsigned)remaining);
         nlog("[net] lịch: %s\n", s_schedLog);
     } else if (parsed) {
         nlog("[net] 200: đồng hồ chưa dùng được, chưa áp lịch; queue còn %u\n",
