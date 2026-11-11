@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,12 +30,18 @@ const sampleHeartbeat = `{"id":"a4cf12b8e901","fw":"0.1.0","uptime_s":123456,"rs
 func newTestServer(t *testing.T, schedule string) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
+	st, err := OpenStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
 	if schedule != "" {
-		if err := os.WriteFile(filepath.Join(dir, "schedule.json"), []byte(schedule), 0o644); err != nil {
+		if err := st.SetDaily(schedule); err != nil {
 			t.Fatal(err)
 		}
 	}
 	s := &Server{
+		Store:    st,
 		Token:    testToken,
 		DeviceID: testID,
 		DataDir:  dir,
@@ -57,48 +62,41 @@ func post(s *Server, auth, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-const goodSchedule = `{"daily":"25200:900,61200","days":{"2026-11-12":"28800"}}`
+// Dòng 1 (lịch dự phòng) cho newTestServer; rỗng ⇒ chưa đặt lịch.
+const goodSchedule = "25200:900,61200"
 
 func TestHeartbeatOK(t *testing.T) {
-	s, dir := newTestServer(t, goodSchedule)
+	s, _ := newTestServer(t, goodSchedule)
 	rec := post(s, "Bearer "+testToken, sampleHeartbeat)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d, body %q", rec.Code, rec.Body.String())
 	}
-	if got := rec.Body.String(); got != "25200:900,61200\n28800" {
+	if got := rec.Body.String(); got != "25200:900,61200" {
 		t.Errorf("body = %q", got)
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("content-type = %q", ct)
 	}
 
-	hb := readLines(t, filepath.Join(dir, "heartbeats.jsonl"))
-	if len(hb) != 1 {
-		t.Fatalf("heartbeats.jsonl có %d dòng", len(hb))
+	_, raw, ok, err := s.Store.LastHeartbeat()
+	if err != nil || !ok || string(raw) != sampleHeartbeat {
+		t.Errorf("heartbeat lưu = %s ok=%v err=%v", raw, ok, err)
 	}
-	var rec1 map[string]any
-	if err := json.Unmarshal([]byte(hb[0]), &rec1); err != nil {
-		t.Fatal(err)
-	}
-	if rec1["received_at"] == nil || rec1["heartbeat"] == nil {
-		t.Errorf("thiếu trường: %s", hb[0])
-	}
-
-	ev := readLines(t, filepath.Join(dir, "events.jsonl"))
-	if len(ev) != 3 {
-		t.Fatalf("events.jsonl có %d dòng", len(ev))
+	ev, err := s.Store.Events(10)
+	if err != nil || len(ev) != 3 {
+		t.Fatalf("events = %d, err %v", len(ev), err)
 	}
 	var e map[string]any
-	if err := json.Unmarshal([]byte(ev[2]), &e); err != nil {
+	if err := json.Unmarshal(ev[0], &e); err != nil {
 		t.Fatal(err)
 	}
 	if e["id"] != testID || e["type"] != "skipped" || e["reason"] != "rest" || e["received_at"] == nil {
-		t.Errorf("event sai: %s", ev[2])
+		t.Errorf("event sai: %s", ev[0])
 	}
 }
 
 func TestHeartbeatAuth(t *testing.T) {
-	s, dir := newTestServer(t, goodSchedule)
+	s, _ := newTestServer(t, goodSchedule)
 	for _, auth := range []string{"", "Bearer wrong", "s3cret", "Basic s3cret", "Bearer "} {
 		if rec := post(s, auth, sampleHeartbeat); rec.Code != http.StatusUnauthorized {
 			t.Errorf("auth %q: code %d, want 401", auth, rec.Code)
@@ -108,7 +106,7 @@ func TestHeartbeatAuth(t *testing.T) {
 	if rec := post(s, "Bearer "+testToken, other); rec.Code != http.StatusForbidden {
 		t.Errorf("id lạ: code %d, want 403", rec.Code)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "heartbeats.jsonl")); err == nil {
+	if _, _, ok, _ := s.Store.LastHeartbeat(); ok {
 		t.Error("request bị từ chối không được ghi log")
 	}
 }
@@ -134,19 +132,28 @@ func TestHeartbeatBadRequests(t *testing.T) {
 	}
 }
 
-func TestScheduleBrokenReturns503AndLogsNothing(t *testing.T) {
-	for name, sched := range map[string]string{"missing": "", "invalid": `{"daily":"abc"}`} {
-		t.Run(name, func(t *testing.T) {
-			s, dir := newTestServer(t, sched)
-			rec := post(s, "Bearer "+testToken, sampleHeartbeat)
-			if rec.Code != http.StatusServiceUnavailable {
-				t.Fatalf("code %d, want 503", rec.Code)
-			}
-			// ESP không xoá events khi ≠ 200 và sẽ gửi lại ⇒ server không được ghi để tránh trùng.
-			if _, err := os.Stat(filepath.Join(dir, "events.jsonl")); err == nil {
-				t.Error("không được ghi events khi trả 503")
-			}
-		})
+func TestScheduleMissingReturns503AndLogsNothing(t *testing.T) {
+	s, _ := newTestServer(t, "")
+	rec := post(s, "Bearer "+testToken, sampleHeartbeat)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code %d, want 503", rec.Code)
+	}
+	// ESP không xoá events khi ≠ 200 và sẽ gửi lại ⇒ server không được ghi để tránh trùng.
+	if _, _, ok, _ := s.Store.LastHeartbeat(); ok {
+		t.Error("không được ghi heartbeat khi trả 503")
+	}
+	if ev, _ := s.Store.Events(10); len(ev) != 0 {
+		t.Error("không được ghi events khi trả 503")
+	}
+}
+
+// Lỗi DB (đọc lịch hoặc ghi) ⇒ 503 để ESP giữ events và gửi lại; không panic.
+func TestHeartbeatDBErrorReturns503(t *testing.T) {
+	s, _ := newTestServer(t, goodSchedule)
+	s.Store.Close()
+	rec := post(s, "Bearer "+testToken, sampleHeartbeat)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code %d, want 503", rec.Code)
 	}
 }
 
@@ -176,7 +183,7 @@ func TestHTTP10RawRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || string(body) != "25200:900,61200\n28800" {
+	if resp.StatusCode != 200 || string(body) != "25200:900,61200" {
 		t.Fatalf("status %d body %q", resp.StatusCode, body)
 	}
 	if len(resp.TransferEncoding) != 0 {
@@ -188,15 +195,6 @@ func TestHTTP10RawRequest(t *testing.T) {
 	if _, err := http.ParseTime(resp.Header.Get("Date")); err != nil {
 		t.Errorf("Date header %q: %v", resp.Header.Get("Date"), err)
 	}
-}
-
-func readLines(t *testing.T, p string) []string {
-	t.Helper()
-	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 }
 
 func itoa(n int) string {

@@ -13,13 +13,10 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/fs"
 	"log"
 	"mime"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +29,7 @@ import (
 //	POST /logout
 //	GET  /api/state     heartbeat cuối + online + lịch hiện hành + body lịch trả hôm nay
 //	GET  /api/schedule
-//	PUT  /api/schedule  JSON {"daily": "...", "days": {...}}, ghi atomic vào schedule.json
+//	PUT  /api/schedule  JSON {"daily": "..."}, lưu vào SQLite
 //	GET  /api/events    ?limit=N (mặc định 100, tối đa 1000), mới nhất trước
 //
 // Mọi request POST khác vẫn là heartbeat của thiết bị (Bearer token), như trước.
@@ -48,7 +45,6 @@ const (
 	onlineWindow      = 15 * time.Minute // 3 lần heartbeat định kỳ (300 s)
 	defaultEventLimit = 100
 	maxEventLimit     = 1000
-	tailChunk         = 64 << 10
 )
 
 //go:embed ui/index.html
@@ -56,7 +52,7 @@ var pageSource string
 
 var pageTemplate = template.Must(template.New("page").Parse(pageSource))
 
-var errScheduleMissing = errors.New("chưa có schedule.json — lưu lịch để tạo")
+var errScheduleMissing = errors.New("chưa có lịch dự phòng — lưu lịch để tạo")
 
 type loginFailures struct {
 	first time.Time
@@ -361,18 +357,16 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func (s *Server) schedulePath() string { return filepath.Join(s.DataDir, "schedule.json") }
-
-// currentSchedule đọc lịch với thông báo lỗi không chứa đường dẫn (để hiện trên UI).
+// currentSchedule đọc lịch dự phòng (dòng 1) từ DB; chưa đặt ⇒ errScheduleMissing.
 func (s *Server) currentSchedule() (*Schedule, error) {
-	raw, err := os.ReadFile(s.schedulePath())
-	if errors.Is(err, fs.ErrNotExist) {
+	daily, err := s.Store.Daily()
+	if err != nil {
+		return nil, err
+	}
+	if daily == "" {
 		return nil, errScheduleMissing
 	}
-	if err != nil {
-		return nil, fmt.Errorf("không đọc được schedule.json: %w", err)
-	}
-	return parseSchedule(raw)
+	return &Schedule{Daily: daily}, nil
 }
 
 type stateResponse struct {
@@ -404,7 +398,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		resp.ScheduleError = err.Error()
 	} else {
 		resp.Schedule = sched
-		body := sched.render(resp.Today)
+		body := sched.Daily
 		resp.TodayBody = &body
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -438,54 +432,17 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Lịch không hợp lệ: "+err.Error())
 		return
 	}
-	data, err := json.MarshalIndent(sched, "", "  ")
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Lỗi tạo JSON.")
+	if len(sched.Days) > 0 {
+		writeJSONError(w, http.StatusBadRequest, "Lịch riêng theo ngày đã chuyển sang /api/sessions.")
 		return
 	}
-	s.scheduleMu.Lock()
-	err = writeFileAtomic(s.schedulePath(), append(data, '\n'), 0o644)
-	s.scheduleMu.Unlock()
-	if err != nil {
+	if err := s.Store.SetDaily(sched.Daily); err != nil {
 		log.Printf("UI: lỗi ghi lịch: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "Không ghi được schedule.json.")
+		writeJSONError(w, http.StatusInternalServerError, "Không ghi được lịch.")
 		return
 	}
-	log.Printf("UI: %s lưu lịch: daily=%q, %d ngày riêng", s.clientIP(r), sched.Daily, len(sched.Days))
-	writeJSON(w, http.StatusOK, sched)
-}
-
-// writeFileAtomic ghi file tạm cùng thư mục rồi rename: thiết bị không bao giờ đọc phải file ghi dở.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			f.Close()
-			os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Chmod(perm); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+	log.Printf("UI: %s lưu lịch: daily=%q", s.clientIP(r), sched.Daily)
+	writeJSON(w, http.StatusOK, &Schedule{Daily: sched.Daily})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -498,19 +455,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, maxEventLimit)
 	}
-	s.mu.Lock()
-	lines, err := tailLines(filepath.Join(s.DataDir, "events.jsonl"), limit, tailChunk)
-	s.mu.Unlock()
+	events, err := s.Store.Events(limit)
 	if err != nil {
 		log.Printf("UI: lỗi đọc events: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, "Không đọc được events.jsonl.")
+		writeJSONError(w, http.StatusInternalServerError, "Không đọc được events.")
 		return
-	}
-	events := make([]json.RawMessage, 0, len(lines))
-	for _, l := range lines {
-		if json.Valid(l) {
-			events = append(events, l)
-		}
 	}
 	writeJSON(w, http.StatusOK, events)
 }
@@ -523,75 +472,12 @@ func (s *Server) setLastHeartbeat(at time.Time, raw []byte) {
 	s.lastMu.Unlock()
 }
 
-// LoadLastHeartbeat nạp heartbeat cuối từ đuôi heartbeats.jsonl (gọi lúc khởi động).
-// Chưa có file ⇒ không lỗi.
+// LoadLastHeartbeat nạp heartbeat cuối từ DB (gọi lúc khởi động). Chưa có ⇒ không lỗi.
 func (s *Server) LoadLastHeartbeat() error {
-	// Lấy vài dòng cuối phòng dòng cuối cùng ghi dở (mất điện giữa lúc ghi).
-	lines, err := tailLines(filepath.Join(s.DataDir, "heartbeats.jsonl"), 3, tailChunk)
-	if err != nil {
+	at, raw, ok, err := s.Store.LastHeartbeat()
+	if err != nil || !ok {
 		return err
 	}
-	for _, l := range lines {
-		var rec struct {
-			ReceivedAt string          `json:"received_at"`
-			Heartbeat  json.RawMessage `json:"heartbeat"`
-		}
-		if json.Unmarshal(l, &rec) != nil || len(rec.Heartbeat) == 0 {
-			continue
-		}
-		at, err := time.Parse(time.RFC3339, rec.ReceivedAt)
-		if err != nil {
-			continue
-		}
-		s.setLastHeartbeat(at, rec.Heartbeat)
-		return nil
-	}
+	s.setLastHeartbeat(at, raw)
 	return nil
-}
-
-// tailLines trả tối đa n dòng không rỗng cuối file, mới nhất trước, đọc ngược từng khối
-// chunk byte (không đọc cả file). File chưa có ⇒ rỗng, không lỗi.
-func tailLines(path string, n, chunk int) ([][]byte, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	var lines [][]byte
-	var rest []byte // phần đầu dòng chưa biết điểm bắt đầu
-	pos := st.Size()
-	for pos > 0 && len(lines) < n {
-		size := int64(chunk)
-		if size > pos {
-			size = pos
-		}
-		pos -= size
-		buf := make([]byte, size, int(size)+len(rest))
-		if _, err := f.ReadAt(buf, pos); err != nil {
-			return nil, err
-		}
-		buf = append(buf, rest...)
-		for len(lines) < n {
-			i := bytes.LastIndexByte(buf, '\n')
-			if i < 0 {
-				break
-			}
-			if line := buf[i+1:]; len(line) > 0 {
-				lines = append(lines, line)
-			}
-			buf = buf[:i]
-		}
-		rest = buf
-	}
-	if pos == 0 && len(rest) > 0 && len(lines) < n {
-		lines = append(lines, rest)
-	}
-	return lines, nil
 }

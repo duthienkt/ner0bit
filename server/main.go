@@ -6,6 +6,7 @@
 //	NER0BIT_DEVICE_ID  MAC 12 hex của thiết bị; rỗng ⇒ nhận mọi id
 //	NER0BIT_ADDR       địa chỉ lắng nghe, mặc định ":8080"
 //	NER0BIT_DATA_DIR   thư mục dữ liệu, mặc định "./data"
+//	NER0BIT_DB         file SQLite, mặc định "$NER0BIT_DATA_DIR/ner0bit.db"
 //	NER0BIT_TRUST_CF_HEADER=1  tin header CF-Connecting-IP — CHỈ khi chạy sau Cloudflare Tunnel, không mở port
 //	NER0BIT_UI_PASSWORD mật khẩu giao diện web (GET /); trống ⇒ tắt UI. Tách khỏi token thiết bị
 //	                   vì UI sửa được lịch, tức điều khiển được bơm — dùng chuỗi dài, ngẫu nhiên.
@@ -47,9 +48,15 @@ func main() {
 	if err := os.MkdirAll(srv.DataDir, 0o755); err != nil {
 		log.Fatalf("tạo thư mục dữ liệu: %v", err)
 	}
-	if _, err := loadSchedule(filepath.Join(srv.DataDir, "schedule.json")); err != nil {
-		// Không dừng: sửa file xong là có hiệu lực ngay (đọc lại mỗi request); tới lúc đó trả 503.
-		log.Printf("CẢNH BÁO: lịch chưa dùng được: %v", err)
+	store, err := OpenStore(getenv("NER0BIT_DB", filepath.Join(srv.DataDir, "ner0bit.db")))
+	if err != nil {
+		log.Fatalf("mở DB: %v", err)
+	}
+	defer store.Close()
+	srv.Store = store
+	if d, err := store.Daily(); err != nil || d == "" {
+		// Không dừng: lưu lịch qua UI là có hiệu lực ngay; tới lúc đó heartbeat trả 503.
+		log.Printf("CẢNH BÁO: lịch chưa dùng được (chưa đặt lịch dự phòng): %v", err)
 	}
 	if err := srv.LoadLastHeartbeat(); err != nil {
 		log.Printf("CẢNH BÁO: không nạp được heartbeat cuối: %v", err)
