@@ -343,11 +343,15 @@ void schedulerTick() {
             s_warned = true;
             nlogln("[sched] đồng hồ chưa hợp lệ — bơm tắt, bỏ tick (chờ NTP / server)");
         }
-        if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy do đồng hồ không dùng được");
+        if (r.hasEvent) nlogln("[sched] 🛑 dừng phiên đang chạy do đồng hồ không dùng được");
     } else {
         s_warned = false;
     }
-    if (r.pumpOn != wasOn) nlog("[sched] bơm %s\n", r.pumpOn ? "BẬT" : "TẮT");
+    if (r.pumpOn != wasOn)
+        nlogln(r.pumpOn ? "[sched] 💦 Bắt đầu tưới (bơm BẬT)" : "[sched] 🛑 Ngừng tưới (bơm TẮT)");
+    if (r.hasEvent && r.event.type == EventType::Skipped)
+        nlogln(r.event.reason == Reason::Rest ? "[sched] ⏭️ Bỏ mốc tưới (nghỉ giữa 2 phiên)"
+                                              : "[sched] ⏭️ Bỏ mốc tưới (bận — phiên khác đang chạy)");
     logEvent(r);
 }
 
@@ -361,7 +365,7 @@ void stopPumpForRestart() {
         switched = persist(r);
     }
     if (switched) logStorageFailover();
-    if (r.hasEvent) nlogln("[sched] dừng phiên đang chạy trước khi khởi động lại");
+    if (r.hasEvent) nlogln("[sched] 🛑 dừng phiên đang chạy trước khi khởi động lại");
     logEvent(r);
 }
 
