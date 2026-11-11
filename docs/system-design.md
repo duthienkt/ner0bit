@@ -297,5 +297,5 @@ Cấu hình (WiFi, Server URL, Token) **luôn ở NVS**, không bao giờ chép 
 
 - ~~Module PHP~~ → đã thay bằng **server Go** (`server/`): heartbeat + trả lịch từ `data/schedule.json` + log `heartbeats.jsonl`/`events.jsonl`. Chỉ 1 thiết bị, kiểm tra token + `id`.
 - **Module thời tiết**: chỉnh dòng 2 theo dự báo.
-- **Web-client**: xem trạng thái thiết bị, sửa lịch.
+- ~~Web-client~~ → giao diện web nhúng trong server Go (`server/ui/index.html`, bật bằng `NER0BIT_UI_PASSWORD`): xem trạng thái thiết bị, sửa lịch.
 - **Enclosure**: đã có file `.blend` ban đầu.

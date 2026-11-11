@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -34,27 +35,39 @@ func loadSchedule(path string) (*Schedule, error) {
 	if err != nil {
 		return nil, err
 	}
+	s, err := parseSchedule(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
+}
+
+// parseSchedule kiểm tra nội dung JSON của lịch (dùng chung cho file và PUT /api/schedule).
+func parseSchedule(raw []byte) (*Schedule, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var s Schedule
 	if err := dec.Decode(&s); err != nil {
-		return nil, fmt.Errorf("%s: JSON sai: %w", path, err)
+		return nil, fmt.Errorf("JSON sai: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("JSON sai: thừa dữ liệu sau lịch")
 	}
 	daily, err := normalizeLine(s.Daily)
 	if err != nil {
-		return nil, fmt.Errorf("%s: daily: %w", path, err)
+		return nil, fmt.Errorf("daily: %w", err)
 	}
 	if daily == "" {
-		return nil, fmt.Errorf("%s: daily phải có ít nhất 1 mốc", path)
+		return nil, fmt.Errorf("daily phải có ít nhất 1 mốc")
 	}
 	s.Daily = daily
 	for date, line := range s.Days {
 		if _, err := time.Parse(time.DateOnly, date); err != nil {
-			return nil, fmt.Errorf("%s: days: ngày %q phải dạng YYYY-MM-DD", path, date)
+			return nil, fmt.Errorf("days: ngày %q phải dạng YYYY-MM-DD", date)
 		}
 		norm, err := normalizeLine(line)
 		if err != nil {
-			return nil, fmt.Errorf("%s: days[%s]: %w", path, date, err)
+			return nil, fmt.Errorf("days[%s]: %w", date, err)
 		}
 		s.Days[date] = norm
 	}
