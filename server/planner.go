@@ -25,6 +25,8 @@ type Decision struct {
 	AvailRainS  float64
 	AvailSunS   float64
 	SunS        float64
+	ETMM        float64  // bốc hơi ngày (mm) của lần buổi chiều; 0 nếu không tính
+	Notes       []string // cảnh báo lúc chốt (Vrain trễ, METAR thiếu…); scheduler điền
 	Reason      string
 }
 

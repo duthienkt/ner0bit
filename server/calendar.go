@@ -149,7 +149,7 @@ func (s *Store) DeleteManualSession(id int64) error {
 
 // Sessions trả mọi phiên của ngày date (kể cả đã xoá), theo giờ bắt đầu rồi id.
 func (s *Store) Sessions(date string) ([]Session, error) {
-	rows, err := s.db.Query(`SELECT id, date, start_s, run_s, source, state, COALESCE(vday, ''), slot_s, note, created_at
+	rows, err := s.db.Query(`SELECT id, date, start_s, run_s, source, state, COALESCE(vday, ''), slot_s, note, reason, created_at
 		FROM sessions WHERE date = ? ORDER BY start_s, id`, date)
 	if err != nil {
 		return nil, fmt.Errorf("đọc phiên: %w", err)
@@ -160,7 +160,7 @@ func (s *Store) Sessions(date string) ([]Session, error) {
 		var ss Session
 		var slot sql.NullInt64
 		var created string
-		if err := rows.Scan(&ss.ID, &ss.Date, &ss.StartS, &ss.RunS, &ss.Source, &ss.State, &ss.VDay, &slot, &ss.Note, &created); err != nil {
+		if err := rows.Scan(&ss.ID, &ss.Date, &ss.StartS, &ss.RunS, &ss.Source, &ss.State, &ss.VDay, &slot, &ss.Note, &ss.Reason, &created); err != nil {
 			return nil, fmt.Errorf("đọc phiên: %w", err)
 		}
 		if slot.Valid {
@@ -223,8 +223,10 @@ func (s *Store) dayEntries(date string) ([]entry, error) {
 	return append(parseLineEntries(daily), man...), nil
 }
 
-// deviceBody sinh body response cho ESP lúc now. Tự động tắt: chỉ dòng 1 (daily); có phiên
-// manual hôm nay thì thêm dòng 2 = daily ∪ manual. (Nhánh tự động bật: Task 8.)
+// deviceBody sinh body response cho ESP lúc now (spec §4.5).
+//   - Tự động tắt: chỉ dòng 1 (daily); có phiên manual hôm nay thì thêm dòng 2 = daily ∪ manual.
+//   - Tự động bật: dòng 2 = phiên auto đã chốt có run > 0 ∪ phiên manual ∪ bản tạm của các lần
+//     chưa chốt có run > 0. Rỗng ⇒ dòng 2 rỗng (hôm nay không tưới).
 func (srv *Server) deviceBody(now time.Time) (string, error) {
 	daily, err := srv.Store.Daily()
 	if err != nil {
@@ -233,7 +235,19 @@ func (srv *Server) deviceBody(now time.Time) (string, error) {
 	if daily == "" {
 		return "", errScheduleMissing
 	}
-	man, err := srv.Store.manualEntries(now.In(vietnam).Format(time.DateOnly))
+	p, err := srv.Store.Params()
+	if err != nil {
+		return "", err
+	}
+	date := now.In(vietnam).Format(time.DateOnly)
+	if p.AutoEnabled {
+		es, err := srv.Store.autoDayEntries(date, now, p)
+		if err != nil {
+			return "", err
+		}
+		return daily + "\n" + renderLine(es), nil
+	}
+	man, err := srv.Store.manualEntries(date)
 	if err != nil {
 		return "", err
 	}
@@ -241,6 +255,32 @@ func (srv *Server) deviceBody(now time.Time) (string, error) {
 		return daily, nil
 	}
 	return daily + "\n" + renderLine(append(parseLineEntries(daily), man...)), nil
+}
+
+// autoDayEntries là dòng 2 của ngày date khi bật tự động (xem deviceBody).
+func (s *Store) autoDayEntries(date string, now time.Time, p Params) ([]entry, error) {
+	ss, err := s.Sessions(date)
+	if err != nil {
+		return nil, err
+	}
+	var es []entry
+	for _, x := range ss {
+		switch {
+		case x.Source == sessionAuto && x.State == stateFinal && x.RunS > 0,
+			x.Source == sessionManual && x.State != stateDeleted:
+			es = append(es, entry{x.StartS, x.RunS})
+		}
+	}
+	prov, err := s.Provisional(date, now, p)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range prov {
+		if d.RunS > 0 {
+			es = append(es, entry{d.Slot.StartS, d.RunS})
+		}
+	}
+	return es, nil
 }
 
 // ---- HTTP ----
