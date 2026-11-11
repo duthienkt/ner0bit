@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,34 @@ func TestGetScheduleShape(t *testing.T) {
 	rec := do(s, http.MethodGet, "/api/schedule", "", withCookie(ck))
 	if strings.TrimSpace(rec.Body.String()) != `{"daily":"`+threeSlots+`"}` {
 		t.Errorf("GET /api/schedule = %q", rec.Body.String())
+	}
+}
+
+func TestPutScheduleRejectsOverflowWithManual(t *testing.T) {
+	s, _, _ := newUIServer(t, threeSlots)
+	ck := mustLogin(t, s)
+	for i := 0; i < 3; i++ {
+		if _, err := s.Store.AddManualSession("2026-11-13", 40000+i*1000, 60, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Phiên ngày đã qua không tính.
+	if _, err := s.Store.db.Exec(`INSERT INTO sessions(date,start_s,run_s,source,state,note,created_at,updated_at)
+		VALUES('2026-11-01',1,60,'manual','final','','x','x')`); err != nil {
+		t.Fatal(err)
+	}
+	put := func(daily string) *httptest.ResponseRecorder {
+		return do(s, http.MethodPut, "/api/schedule", `{"daily":"`+daily+`"}`, withCookie(ck), withHeader("Content-Type", "application/json"))
+	}
+	over := strings.TrimSuffix(strings.Repeat("100:60,", 18), ",") // 18 + 3 > 20
+	rec := put(over)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "2026-11-13") {
+		t.Errorf("code %d body %s", rec.Code, rec.Body.String())
+	}
+	if d, _ := s.Store.Daily(); d != threeSlots {
+		t.Errorf("lịch bị đổi: %q", d)
+	}
+	if rec := put(strings.TrimSuffix(strings.Repeat("100:60,", 17), ",")); rec.Code != 200 { // 17 + 3 = 20
+		t.Errorf("vừa đủ 20: code %d %s", rec.Code, rec.Body.String())
 	}
 }

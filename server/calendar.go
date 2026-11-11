@@ -175,6 +175,26 @@ func (s *Store) manualEntries(date string) ([]entry, error) {
 	return es, nil
 }
 
+// manualCountsFrom: số phiên manual còn hiệu lực theo từng ngày ≥ from.
+func (s *Store) manualCountsFrom(from string) (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT date, COUNT(*) FROM sessions
+		WHERE source = ? AND state != ? AND date >= ? GROUP BY date`, sessionManual, stateDeleted, from)
+	if err != nil {
+		return nil, fmt.Errorf("đếm phiên: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var d string
+		var n int
+		if err := rows.Scan(&d, &n); err != nil {
+			return nil, fmt.Errorf("đếm phiên: %w", err)
+		}
+		out[d] = n
+	}
+	return out, rows.Err()
+}
+
 // dayEntries = daily ∪ phiên manual còn hiệu lực của ngày date (dòng 2 khi tự động tắt).
 func (s *Store) dayEntries(date string) ([]entry, error) {
 	daily, err := s.Daily()

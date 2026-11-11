@@ -443,6 +443,22 @@ func (s *Server) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Lịch riêng theo ngày đã chuyển sang /api/sessions.")
 		return
 	}
+	// Dòng 2 = daily ∪ phiên manual: daily mới không được làm ngày nào từ hôm nay vượt giới hạn mốc.
+	counts, err := s.Store.manualCountsFrom(s.now().In(vietnam).Format(time.DateOnly))
+	if err != nil {
+		log.Printf("UI: lỗi đọc phiên: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Không đọc được phiên.")
+		return
+	}
+	nDaily := len(parseLineEntries(sched.Daily))
+	for date, n := range counts {
+		if nDaily+n > maxEntriesPerLine {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf(
+				"Lịch ngày %s sẽ vượt %d mốc (%d mốc daily + %d phiên bơm thử). Xoá bớt phiên bơm thử trước.",
+				date, maxEntriesPerLine, nDaily, n))
+			return
+		}
+	}
 	if err := s.Store.SetDaily(sched.Daily); err != nil {
 		log.Printf("UI: lỗi ghi lịch: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Không ghi được lịch.")
