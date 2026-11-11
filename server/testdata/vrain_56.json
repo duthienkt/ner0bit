@@ -1,0 +1,50 @@
+[
+ {
+  "color": "#535353",
+  "level": "Không mưa",
+  "station": {
+   "address": "539/18/3 Đỗ Xuân Hợp, phường Phước Long",
+   "area": {
+    "id": 3044,
+    "name": "Phước Long",
+    "type": "phường",
+    "codeName": "phuoc_long"
+   },
+   "city": {
+    "id": 56,
+    "name": "TP Hồ Chí Minh",
+    "type": "thành phố",
+    "codeName": "ho_chi_minh"
+   },
+   "lat": 10.813611,
+   "lng": 106.776389,
+   "name": "Đỗ Xuân Hợp",
+   "uuid": "726096c3-2ede-47f1-827e-0dc1ffe8d897"
+  },
+  "sumDepth": 0.0
+ },
+ {
+  "color": "#1DADE9",
+  "level": "Mưa nhỏ",
+  "station": {
+   "address": "Ban quản lý cảng Bến Đầm",
+   "area": {
+    "id": 2987,
+    "name": "Côn Đảo",
+    "type": "đặc khu",
+    "codeName": "con_dao"
+   },
+   "city": {
+    "id": 56,
+    "name": "TP Hồ Chí Minh",
+    "type": "thành phố",
+    "codeName": "ho_chi_minh"
+   },
+   "lat": 8.65361,
+   "lng": 106.57444,
+   "name": "Côn Đảo",
+   "uuid": "0fce3bbc-472e-4c7f-9ab3-7d2faec1e353"
+  },
+  "sumDepth": 12.6
+ }
+]
