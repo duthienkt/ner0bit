@@ -201,3 +201,28 @@ func itoa(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)
 }
+
+// R2: đọc lịch được nhưng ghi heartbeat/event lỗi ⇒ 503 "storage error", không lưu gì
+// (transaction cuộn lại cả heartbeat lẫn event), ESP giữ events và gửi lại.
+func TestHeartbeatWriteErrorReturns503(t *testing.T) {
+	s, _ := newTestServer(t, goodSchedule)
+	if _, err := s.Store.db.Exec(`CREATE TRIGGER events_fail BEFORE INSERT ON events
+		BEGIN SELECT RAISE(ABORT, 'giả: ghi event lỗi'); END`); err != nil {
+		t.Fatal(err)
+	}
+	rec := post(s, "Bearer "+testToken, sampleHeartbeat)
+	if rec.Code != http.StatusServiceUnavailable || strings.TrimSpace(rec.Body.String()) != "storage error" {
+		t.Fatalf("code %d body %q, muốn 503 \"storage error\"", rec.Code, rec.Body.String())
+	}
+	if _, _, ok, _ := s.Store.LastHeartbeat(); ok {
+		t.Error("không được lưu heartbeat khi ghi lỗi")
+	}
+	if ev, _ := s.Store.Events(10); len(ev) != 0 {
+		t.Errorf("không được lưu event khi ghi lỗi: %+v", ev)
+	}
+	s.lastMu.Lock()
+	defer s.lastMu.Unlock()
+	if s.last != nil {
+		t.Error("không được nhớ heartbeat cuối khi ghi lỗi")
+	}
+}
