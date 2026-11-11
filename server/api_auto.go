@@ -60,7 +60,7 @@ func (s *Store) CancelAutoSession(id int64, at time.Time) error {
 	case err != nil:
 		return fmt.Errorf("huỷ phiên: %w", err)
 	case source != sessionAuto:
-		return &errSession{"Chỉ huỷ được phiên tự động; phiên bơm thử thì xoá."}
+		return &errSession{"Chỉ huỷ được lần tưới theo thời tiết; phiên bơm thử thì xoá."}
 	case date < today || (date == today && startS <= nowS):
 		return &errSession{"Phiên đã qua giờ tưới (thiết bị chạy nốt phiên đang chạy), không huỷ được."}
 	case state != stateFinal:
@@ -104,11 +104,11 @@ func (s *Store) CancelAutoSlot(date string, startS int, at time.Time) error {
 	}
 	switch {
 	case !p.AutoEnabled:
-		return &errSession{"Chế độ tự động đang tắt: không có lần tự động nào để huỷ."}
+		return &errSession{"Đang tưới thủ công: không có lần tưới theo thời tiết nào để huỷ."}
 	case date < today || (date == today && startS <= nowS):
 		return &errSession{"Lần này đã qua giờ tưới (thiết bị chạy nốt phiên đang chạy), không huỷ được."}
 	case !isSlot:
-		return &errSession{fmt.Sprintf("Không có lần tự động lúc %s.", hms(startS))}
+		return &errSession{fmt.Sprintf("Không có lần tưới theo thời tiết lúc %s.", hms(startS))}
 	}
 	ss, err := sessionsQ(tx, date)
 	if err != nil {
@@ -241,7 +241,7 @@ func (s *Server) dayView(date string, now time.Time) (*dayResponse, error) {
 	}
 	if date == today {
 		if daily == "" {
-			resp.Warnings = append(resp.Warnings, "Chưa có lịch dự phòng: thiết bị đang nhận lỗi 503 và giữ lịch cũ.")
+			resp.Warnings = append(resp.Warnings, "Chưa có lịch thủ công: thiết bị đang nhận lỗi 503 và giữ lịch cũ.")
 		} else {
 			body, warns := bodyOf(daily, p.AutoEnabled, ss, prov)
 			resp.DeviceBody = &body
@@ -667,7 +667,7 @@ func (s *Server) overflowWith(p Params, today string, skips []slotSkip) (string,
 			sk = skipped
 		}
 		if base, n := lineBase(daily, p, ss, sk), manualCount(ss); base+n > maxEntriesPerLine {
-			return fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc daily/tự động + %d phiên bơm thử). Xoá bớt phiên bơm thử hoặc bớt lần tưới.",
+			return fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc lịch nền + %d phiên bơm thử). Xoá bớt phiên bơm thử hoặc bớt lần tưới.",
 				d, maxEntriesPerLine, base, n), nil
 		}
 	}

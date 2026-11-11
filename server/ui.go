@@ -56,7 +56,7 @@ var pageSource string
 
 var pageTemplate = template.Must(template.New("page").Parse(pageSource))
 
-var errScheduleMissing = errors.New("chưa có lịch dự phòng — lưu lịch để tạo")
+var errScheduleMissing = errors.New("chưa có lịch thủ công — lưu lịch để tạo")
 
 type loginFailures struct {
 	first time.Time

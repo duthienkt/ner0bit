@@ -380,7 +380,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
 
   <section aria-labelledby="cal-h">
     <div class="sec-head"><h2 id="cal-h">Lịch tưới</h2></div>
-    <p class="sec-lede">Các lần tưới của từng ngày. Phiên tự động do server chốt lúc :09 trước giờ tưới; phần in nghiêng là bản tạm, còn đổi theo mưa. Thêm phiên bơm thử chỉ cộng thêm, không đụng lần tự động.</p>
+    <p class="sec-lede">Các lần tưới của từng ngày. Khi tưới theo thời tiết, server chốt từng lần lúc :09 trước giờ tưới; phần in nghiêng là bản tạm, còn đổi theo mưa. Thêm phiên bơm thử chỉ cộng thêm, không đụng các lần khác.</p>
     <div class="day-tools">
       <button class="btn btn-line" type="button" id="cal-prev" aria-label="Ngày trước">‹</button>
       <input type="date" id="cal-date" aria-label="Chọn ngày">
@@ -400,14 +400,14 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   </section>
 
   <section aria-labelledby="auto-h">
-    <div class="sec-head"><h2 id="auto-h">Thiết lập tự động</h2></div>
+    <div class="sec-head"><h2 id="auto-h">Tưới theo thời tiết</h2></div>
     <p class="sec-lede">Server tính số phút mỗi lần từ mưa đo ở trạm Vrain Đỗ Xuân Hợp (cộng dồn từ 19h hôm trước) và nắng ước từ METAR Tân Sơn Nhất. Mưa dưới ngưỡng thấp không giảm; từ ngưỡng cao trở lên thì không tưới.</p>
     <div id="settings"></div>
   </section>
 
   <section aria-labelledby="daily-h">
-    <div class="sec-head"><h2 id="daily-h">Lịch dự phòng</h2></div>
-    <p class="sec-lede">Dòng 1 gửi thiết bị, lặp mỗi ngày. Thiết bị tưới theo lịch này khi tắt tự động (cộng các phiên bơm thử), và giữ nó khi không lấy được lịch mới. Server không bao giờ tự sửa lịch này.</p>
+    <div class="sec-head"><h2 id="daily-h">Lịch thủ công</h2></div>
+    <p class="sec-lede">Lịch bạn tự nhập, lặp mỗi ngày. Chế độ thủ công tưới theo lịch này (cộng các phiên bơm thử). Khi tưới theo thời tiết, đây là lịch dự phòng: thiết bị chỉ dùng khi không lấy được lịch từ server. Server không bao giờ tự sửa lịch này.</p>
     <div id="load-error"></div>
     <div id="daily"></div>
   </section>
@@ -419,8 +419,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   </section>
 
   <footer>Trạng thái và hoạt động tự làm mới mỗi 15 giây. Giờ hiển thị theo giờ Việt Nam.</footer>
-  <div class="savebar" id="savebar" role="region" aria-label="Lưu lịch dự phòng">
-    <p id="save-msg">Lịch dự phòng có thay đổi chưa lưu</p>
+  <div class="savebar" id="savebar" role="region" aria-label="Lưu lịch thủ công">
+    <p id="save-msg">Lịch thủ công có thay đổi chưa lưu</p>
     <button class="btn btn-line" type="button" id="revert">Bỏ thay đổi</button>
     <button class="btn" type="button" id="save">Lưu lịch</button>
   </div>
@@ -435,7 +435,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   var VN_OFFSET = 7 * 3600 * 1000;
   var WEEKDAYS = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
   var EVENT_TYPE = { start: 'Bật bơm', stop: 'Tắt bơm', skipped: 'Bỏ mốc' };
-  var EVENT_SOURCE = { normal: 'lịch dự phòng', today: 'lịch hôm nay', failsafe: 'lịch lưu trên thiết bị (lần lấy lịch gần nhất bị lỗi)' };
+  var EVENT_SOURCE = { normal: 'lịch thủ công', today: 'lịch hôm nay', failsafe: 'lịch lưu trên thiết bị (lần lấy lịch gần nhất bị lỗi)' };
   var EVENT_REASON = {
     done: 'tưới đủ thời lượng',
     capped: 'bị cắt ở giới hạn 30 phút',
@@ -449,11 +449,11 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     lost_power: ['Từng mất nguồn pin', 'warn'],
     failed: ['Lỗi, đã ngừng dùng', 'bad']
   };
-  var KIND = { auto: ['Tự động', ''], manual: ['Bơm thử', 'manual'], daily: ['Dự phòng', 'daily'] };
+  var KIND = { auto: ['Theo thời tiết', ''], manual: ['Bơm thử', 'manual'], daily: ['Thủ công', 'daily'] };
   var STATE = {
     final: ['Đã chốt', ''], skipped: ['Bỏ', 'warn'], cancelled: ['Đã huỷ', 'bad'],
     provisional: ['Tạm tính', 'daily'], daily: ['Theo lịch', 'daily'], planned: ['Đã thêm', 'manual'],
-    unsent: ['Không gửi (tự động đang tắt)', 'daily']
+    unsent: ['Không gửi (đang tưới thủ công)', 'daily']
   };
   var PHASE = { am: 'Sáng', pm: 'Chiều' };
 
@@ -608,9 +608,9 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   }
   function validate(m) {
     var errs = [];
-    if (!m.daily.length) errs.push('Lịch dự phòng cần ít nhất 1 mốc.');
-    if (m.daily.length > MAX_ENTRIES) errs.push('Lịch dự phòng: tối đa ' + MAX_ENTRIES + ' mốc, đang có ' + m.daily.length + '.');
-    if (m.daily.some(entryErrors)) errs.push('Lịch dự phòng: có mốc chưa nhập đủ giờ hoặc số phút.');
+    if (!m.daily.length) errs.push('Lịch thủ công cần ít nhất 1 mốc.');
+    if (m.daily.length > MAX_ENTRIES) errs.push('Lịch thủ công: tối đa ' + MAX_ENTRIES + ' mốc, đang có ' + m.daily.length + '.');
+    if (m.daily.some(entryErrors)) errs.push('Lịch thủ công: có mốc chưa nhập đủ giờ hoặc số phút.');
     return errs;
   }
 
@@ -698,7 +698,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (!dirty) return;
     var errs = validate(model);
     $('save').disabled = saving || errs.length > 0;
-    msg.textContent = errs.length ? errs[0] : 'Lịch dự phòng có thay đổi chưa lưu';
+    msg.textContent = errs.length ? errs[0] : 'Lịch thủ công có thay đổi chưa lưu';
     msg.className = errs.length ? 'bad' : '';
   }
 
@@ -760,7 +760,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
         savedAt = nowMs();
         setSaved(res.data);
         $('load-error').textContent = '';
-        toast('Đã lưu lịch dự phòng. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
+        toast('Đã lưu lịch thủ công. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
         refresh();
       }
       updateSaveBar();
@@ -897,7 +897,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   }
 
   function cancelSession(r) {
-    if (!confirm('Huỷ lần tưới tự động ' + hm(r.sec) + '? Sổ phút miễn vẫn tính như đã tưới.')) return;
+    if (!confirm('Huỷ lần tưới theo thời tiết ' + hm(r.sec) + '? Sổ phút miễn vẫn tính như đã tưới.')) return;
     send('POST', '/api/sessions/' + r.id + '/cancel').then(function (res) {
       if (!res.ok) return;
       savedAt = nowMs();
@@ -907,7 +907,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   }
   // cancelSlot huỷ trước một lần tự động chưa chốt: tới giờ chốt vẫn chốt và tính sổ, nhưng không gửi thiết bị.
   function cancelSlot(date, r) {
-    if (!confirm('Huỷ lần tưới tự động ' + hm(r.sec) + ' ' + relDay(date).toLowerCase() + '? Tới giờ chốt lần này vẫn được chốt và sổ phút miễn vẫn tính như đã tưới, nhưng thiết bị sẽ không tưới.')) return;
+    if (!confirm('Huỷ lần tưới theo thời tiết ' + hm(r.sec) + ' ' + relDay(date).toLowerCase() + '? Tới giờ chốt lần này vẫn được chốt và sổ phút miễn vẫn tính như đã tưới, nhưng thiết bị sẽ không tưới.')) return;
     send('POST', '/api/day/cancel-slot', { date: date, start_s: r.sec }).then(function (res) {
       if (!res.ok) return;
       savedAt = nowMs();
@@ -970,16 +970,16 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       renderWarns($('today-warns'), state.day);
     }
     if (state.today_body === null || state.today_body === undefined) {
-      mode.textContent = 'Lịch trên server đang lỗi: ' + (state.schedule_error || 'không rõ') + '. Thiết bị giữ lịch cũ cho tới khi lưu lịch dự phòng hợp lệ.';
+      mode.textContent = 'Lịch trên server đang lỗi: ' + (state.schedule_error || 'không rõ') + '. Thiết bị giữ lịch cũ cho tới khi lưu lịch thủ công hợp lệ.';
       raw.textContent = '(server trả lỗi 503)';
       pend.hidden = true;
       return;
     }
     var lines = state.today_body.split('\n');
     var entries;
-    if (autoOn()) mode.textContent = lines[1] === '' ? 'Lịch tự động: hôm nay không tưới.' : 'Lịch tự động đang bật: số phút mỗi lần tính theo mưa và nắng.';
-    else if (lines.length > 1) mode.textContent = 'Tự động đang tắt: tưới theo lịch dự phòng, cộng các phiên bơm thử.';
-    else mode.textContent = 'Tự động đang tắt: tưới theo lịch dự phòng.';
+    if (autoOn()) mode.textContent = lines[1] === '' ? 'Tưới theo thời tiết: hôm nay không tưới.' : 'Đang tưới theo thời tiết: số phút mỗi lần tính theo mưa và nắng.';
+    else if (lines.length > 1) mode.textContent = 'Đang tưới thủ công: theo lịch thủ công, cộng các phiên bơm thử.';
+    else mode.textContent = 'Đang tưới thủ công: theo lịch thủ công.';
     entries = parseLine(lines.length > 1 ? lines[1] : lines[0]).sort(bySec);
     raw.textContent = 'Dòng 1: ' + lines[0] + '\nDòng 2: ' + (lines.length > 1 ? (lines[1] === '' ? '(rỗng: không tưới)' : lines[1]) : '(không có: dùng dòng 1)');
 
@@ -1149,8 +1149,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     chk.checked = form.auto;
     chk.addEventListener('change', function () { form.auto = chk.checked; settingsChanged(); });
     var since = p.auto_enabled && p.auto_enabled_at ? 'Đang bật từ ' + stamp(Date.parse(p.auto_enabled_at)) + '.' :
-      'Đang tắt: thiết bị tưới theo lịch dự phòng.';
-    box.appendChild(h('label', { class: 'switch', for: 'set-auto' }, chk, 'Bật lịch tưới tự động'));
+      'Đang tắt: tưới thủ công theo lịch thủ công.';
+    box.appendChild(h('label', { class: 'switch', for: 'set-auto' }, chk, 'Tưới theo thời tiết'));
     box.appendChild(h('p', { class: 'day-sum', text: since + ' Bật giữa ngày, hoặc thêm/đổi một lần tưới khi đã qua giờ chốt của nó (6 phút trước giờ tưới), thì hôm nay bỏ lần đó.' }));
 
     var slots = h('div', { class: 'entries' });
@@ -1188,9 +1188,9 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (!settings.daily_matches_slots) {
       var slotsText = settings.params.slots.map(function (s) { return hm(s.start_s); }).join(', ');
       box.appendChild(h('div', { class: 'callout' },
-        h('p', { text: 'Lịch dự phòng đang khác lịch tự động (' + slotsText + ', mỗi lần ' + mins(settings.params.block_s) +
-          ' phút). Nếu tắt tự động hoặc thiết bị không lấy được lịch mới, nó sẽ tưới theo lịch dự phòng.' }),
-        h('button', { class: 'btn btn-line', type: 'button', id: 'daily-from-slots', onclick: dailyFromSlots }, 'Đặt lịch dự phòng theo lịch tự động')));
+        h('p', { text: 'Lịch thủ công đang khác giờ tưới theo thời tiết (' + slotsText + ', mỗi lần ' + mins(settings.params.block_s) +
+          ' phút). Nếu chuyển về thủ công hoặc thiết bị không lấy được lịch mới, nó sẽ tưới theo lịch thủ công.' }),
+        h('button', { class: 'btn btn-line', type: 'button', id: 'daily-from-slots', onclick: dailyFromSlots }, 'Chép giờ tưới theo thời tiết sang lịch thủ công')));
     }
     box.appendChild(h('div', { class: 'form-foot' },
       h('p', { id: 'set-msg' }),
@@ -1224,25 +1224,25 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var err = formError(form);
     if (err) { toast(err, true); return; }
     var wasOn = settings.params.auto_enabled;
-    if (form.auto && !wasOn && !confirm('Bật lịch tưới tự động? Từ giờ server tự tính số phút mỗi lần theo mưa và nắng.')) return;
+    if (form.auto && !wasOn && !confirm('Chuyển sang tưới theo thời tiết? Từ giờ server tự tính số phút mỗi lần theo mưa và nắng.')) return;
     $('set-save').disabled = true;
     send('PUT', '/api/settings', paramsOf(form)).then(function (res) {
       if (!res.ok) { settingsChanged(); return; }
       setSettings(res.data, true);
       savedAt = nowMs();
-      toast(form.auto && !wasOn ? 'Đã bật lịch tự động.' : !form.auto && wasOn ? 'Đã tắt lịch tự động. Thiết bị quay về lịch dự phòng.' : 'Đã lưu thiết lập.');
+      toast(form.auto && !wasOn ? 'Đã chuyển sang tưới theo thời tiết.' : !form.auto && wasOn ? 'Đã chuyển về tưới thủ công theo lịch thủ công.' : 'Đã lưu thiết lập.');
       refresh();
     });
   }
 
   function dailyFromSlots() {
-    if (isDirty() && !confirm('Lịch dự phòng đang sửa dở sẽ bị thay. Tiếp tục?')) return;
+    if (isDirty() && !confirm('Lịch thủ công đang sửa dở sẽ bị thay. Tiếp tục?')) return;
     send('POST', '/api/settings/daily-from-slots').then(function (res) {
       if (!res.ok) return;
       setSettings(res.data, true);
       setSaved({ daily: res.data.daily });
       savedAt = nowMs();
-      toast('Đã đặt lịch dự phòng theo lịch tự động.');
+      toast('Đã chép giờ tưới theo thời tiết sang lịch thủ công.');
       refresh();
     });
   }
@@ -1336,7 +1336,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       }
       if (!state.schedule) {
         $('load-error').textContent = '';
-        $('load-error').appendChild(h('p', { class: 'load-error', text: 'Lịch dự phòng dùng không được: ' + state.schedule_error + '. Lưu lịch ở đây sẽ tạo mới.' }));
+        $('load-error').appendChild(h('p', { class: 'load-error', text: 'Lịch thủ công dùng không được: ' + state.schedule_error + '. Lưu lịch ở đây sẽ tạo mới.' }));
       }
       if (!calDate) setCal(state.today);
       else loadCal();

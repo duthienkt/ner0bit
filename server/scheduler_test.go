@@ -401,7 +401,7 @@ func TestEnableMidDaySkipsPast(t *testing.T) {
 	runTicks(t, sc, &clock, vt("2026-11-10", "05:30"), vt("2026-11-10", "05:30"))
 	got := autoSessions(t, st, "2026-11-10")
 	if len(got) != 1 || got[0].StartS != 18900 || got[0].State != stateSkipped || got[0].RunS != 0 ||
-		got[0].Reason != "bật tự động sau giờ chốt" {
+		got[0].Reason != "bật tưới theo thời tiết sau giờ chốt" {
 		t.Fatalf("phiên: %+v", got)
 	}
 	if l, _, err := st.Ledger("2026-11-10"); err != nil || l.UsedRainS != 0 || l.UsedCarryS != 0 {
@@ -533,7 +533,7 @@ func TestDeviceBodyAutoOnSkipsEnabledLate(t *testing.T) {
 func TestDecidedIncludesAllStates(t *testing.T) {
 	st := openTestStore(t)
 	p := DefaultParams()
-	d := Decision{Slot: p.Slots[0], Reason: "bật tự động sau giờ chốt"}
+	d := Decision{Slot: p.Slots[0], Reason: "bật tưới theo thời tiết sau giờ chốt"}
 	if err := st.SaveDecision("2026-11-12", d, Ledger{VDay: "2026-11-12"}, stateSkipped, vt("2026-11-12", "05:30")); err != nil {
 		t.Fatal(err)
 	}
