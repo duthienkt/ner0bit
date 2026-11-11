@@ -31,9 +31,22 @@ func ledgerQ(q querier, vday string) (Ledger, bool, error) {
 	return l, true, nil
 }
 
+// blockRuleSkip là state trong bảng blocks của lần "bỏ" theo luật (bật tự động sau giờ chốt, đổi
+// lịch sau giờ chốt, đã chốt ở giờ cũ): không qua planner, không đụng sổ, không phải một lần tưới
+// thật của ngày. Lần chốt bằng planner ghi stateFinal/stateSkipped. Phiên tương ứng vẫn là
+// stateSkipped (hoặc giữ stateCancelled nếu user đã huỷ trước).
+const blockRuleSkip = "rule_skipped"
+
+// Lý do của phiên user huỷ trước giờ chốt; tới giờ chốt lý do thành tiền tố này + lý do chốt.
+const (
+	reasonCancelIntent = "user huỷ trước giờ chốt"
+	reasonCancelPrefix = "đã huỷ — "
+)
+
 // SaveDecision ghi một lần chốt trong một transaction: blocks + phiên auto + sổ (used_*) của
 // l.VDay. state là stateFinal khi RunS > 0, ngược lại stateSkipped. Slot đã chốt ⇒ lỗi (PK
-// của blocks), nhờ vậy sổ không bao giờ bị trừ hai lần.
+// của blocks), nhờ vậy sổ không bao giờ bị trừ hai lần. User đã huỷ trước lần này ⇒ vẫn chốt và
+// trừ sổ như thường, nhưng phiên giữ trạng thái "đã huỷ" (spec §4.5).
 func (s *Store) SaveDecision(date string, d Decision, l Ledger, state string, decidedAt time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -49,22 +62,52 @@ func (s *Store) SaveDecision(date string, d Decision, l Ledger, state string, de
 	return nil
 }
 
-// saveDecisionTx là phần ghi của SaveDecision trong transaction tx có sẵn.
-func saveDecisionTx(tx *sql.Tx, date string, d Decision, l Ledger, state string, decidedAt time.Time) error {
+// insertBlockTx ghi dòng blocks của một lần đã chốt (planner hoặc luật); đã có ⇒ lỗi PK.
+func insertBlockTx(tx *sql.Tx, date string, d Decision, state string, at string) error {
 	inputs, err := json.Marshal(d)
 	if err != nil {
 		return fmt.Errorf("chốt lần tưới: %w", err)
 	}
-	at := decidedAt.In(vietnam).Format(time.RFC3339)
+	// Slot của ngày D (04:15–18:45) luôn thuộc ngày Vrain D.
 	if _, err := tx.Exec(`INSERT INTO blocks(vday, slot_s, phase, run_s, state, decided_at, inputs_json, reason)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		l.VDay, d.Slot.StartS, d.Slot.Phase, d.RunS, state, at, string(inputs), d.Reason); err != nil {
+		date, d.Slot.StartS, d.Slot.Phase, d.RunS, state, at, string(inputs), d.Reason); err != nil {
 		return fmt.Errorf("chốt lần tưới %s %s: %w", date, hms(d.Slot.StartS), err)
+	}
+	return nil
+}
+
+// writeAutoSessionTx ghi phiên auto của lần vừa chốt. Có phiên "user huỷ trước giờ chốt" của
+// cùng giờ (chưa có dòng blocks nào khác vì insertBlockTx đi trước) ⇒ cập nhật run/lý do, giữ
+// trạng thái huỷ; không thì thêm phiên mới với trạng thái state.
+func writeAutoSessionTx(tx *sql.Tx, date string, d Decision, state string, at string) error {
+	res, err := tx.Exec(`UPDATE sessions SET run_s = ?, vday = ?, slot_s = ?, reason = ?, updated_at = ?
+		WHERE date = ? AND start_s = ? AND source = ? AND state = ?`,
+		d.RunS, date, d.Slot.StartS, reasonCancelPrefix+d.Reason, at, date, d.Slot.StartS, sessionAuto, stateCancelled)
+	if err != nil {
+		return fmt.Errorf("ghi phiên auto: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("ghi phiên auto: %w", err)
+	} else if n > 0 {
+		return nil
 	}
 	if _, err := tx.Exec(`INSERT INTO sessions(date, start_s, run_s, source, state, vday, slot_s, reason, created_at, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		date, d.Slot.StartS, d.RunS, sessionAuto, state, l.VDay, d.Slot.StartS, d.Reason, at, at); err != nil {
+		date, d.Slot.StartS, d.RunS, sessionAuto, state, date, d.Slot.StartS, d.Reason, at, at); err != nil {
 		return fmt.Errorf("ghi phiên auto: %w", err)
+	}
+	return nil
+}
+
+// saveDecisionTx là phần ghi của SaveDecision trong transaction tx có sẵn.
+func saveDecisionTx(tx *sql.Tx, date string, d Decision, l Ledger, state string, decidedAt time.Time) error {
+	at := decidedAt.In(vietnam).Format(time.RFC3339)
+	if err := insertBlockTx(tx, date, d, state, at); err != nil {
+		return err
+	}
+	if err := writeAutoSessionTx(tx, date, d, state, at); err != nil {
+		return err
 	}
 	// carry_in thuộc về CloseDay của ngày trước; ở đây chỉ ghi phần đã dùng.
 	if _, err := tx.Exec(`INSERT INTO days(vday, carry_in, used_carry, used_rain, used_sun) VALUES(?, ?, ?, ?, ?)
@@ -85,55 +128,117 @@ func saveDecisionTx(tx *sql.Tx, date string, d Decision, l Ledger, state string,
 	return nil
 }
 
-// SetParamsSkipping lưu tham số và, trong cùng transaction, ghi "bỏ" (run 0, lý do reason, sổ
-// giữ nguyên) cho các lần skips của ngày date — các lần mới thêm khi giờ chốt đã qua. Nhờ vậy
-// scheduler không bao giờ thấy tham số mới mà chưa thấy các lần "bỏ" đó (không chốt bù chúng).
-func (s *Store) SetParamsSkipping(p Params, date string, skips []Slot, reason string, at time.Time) error {
-	if err := p.Validate(); err != nil {
-		return err
-	}
+// SaveSkip ghi "bỏ" theo luật cho slot của ngày date (run 0, lý do reason, sổ không đổi).
+func (s *Store) SaveSkip(date string, slot Slot, reason string, at time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("ghi tham số: %w", err)
+		return fmt.Errorf("bỏ lần tưới: %w", err)
 	}
 	defer tx.Rollback()
-	if len(skips) > 0 {
-		l, _, err := ledgerQ(tx, date)
-		if err != nil {
-			return err
-		}
-		for _, sl := range skips {
-			if err := saveDecisionTx(tx, date, Decision{Slot: sl, Reason: reason}, l, stateSkipped, at); err != nil {
-				return err
-			}
-		}
-	}
-	if err := setParamsQ(tx, p); err != nil {
+	if err := saveSkipTx(tx, date, slot, reason, at); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("ghi tham số: %w", err)
+		return fmt.Errorf("bỏ lần tưới: %w", err)
 	}
 	return nil
 }
 
-// Decided trả các StartS đã có phiên auto của ngày date, mọi trạng thái (chốt/bỏ/huỷ),
-// để scheduler khởi động lại không chốt lần nữa.
-func (s *Store) Decided(date string) (map[int]bool, error) {
-	rows, err := s.db.Query(`SELECT start_s FROM sessions WHERE date = ? AND source = ?`, date, sessionAuto)
+func saveSkipTx(tx *sql.Tx, date string, slot Slot, reason string, at time.Time) error {
+	ts := at.In(vietnam).Format(time.RFC3339)
+	d := Decision{Slot: slot, Reason: reason}
+	if err := insertBlockTx(tx, date, d, blockRuleSkip, ts); err != nil {
+		return err
+	}
+	return writeAutoSessionTx(tx, date, d, stateSkipped, ts)
+}
+
+// SetParamsSkipping lưu tham số next và, trong cùng transaction, ghi "bỏ" (run 0, sổ giữ nguyên)
+// cho các lần của ngày date mà slotSkips chỉ ra lúc now (đọc tham số đang lưu và các lần đã chốt
+// trong chính transaction này). Nhờ vậy scheduler không bao giờ thấy tham số mới mà chưa thấy các
+// lần "bỏ" đó. Trả các lần đã ghi "bỏ".
+func (s *Store) SetParamsSkipping(next Params, date string, now time.Time) ([]slotSkip, error) {
+	if err := next.Validate(); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("ghi tham số: %w", err)
+	}
+	defer tx.Rollback()
+	cur, err := paramsQ(tx)
+	if err != nil {
+		return nil, err
+	}
+	decided, err := decisionsQ(tx, date)
+	if err != nil {
+		return nil, err
+	}
+	skips, err := slotSkips(cur, next, date, now, decided)
+	if err != nil {
+		return nil, err
+	}
+	for _, sk := range skips {
+		if err := saveSkipTx(tx, date, sk.Slot, sk.Reason, now); err != nil {
+			return nil, err
+		}
+	}
+	if err := setParamsQ(tx, next); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ghi tham số: %w", err)
+	}
+	return skips, nil
+}
+
+// SlotSkips xem trước slotSkips của ngày date với các lần đã chốt hiện có (ngoài transaction ghi).
+func (s *Store) SlotSkips(cur, next Params, date string, now time.Time) ([]slotSkip, error) {
+	decided, err := decisionsQ(s.db, date)
+	if err != nil {
+		return nil, err
+	}
+	return slotSkips(cur, next, date, now, decided)
+}
+
+// decidedSlot là một dòng blocks của ngày: lần đã chốt bằng planner (Rule=false) hay "bỏ" theo luật.
+type decidedSlot struct {
+	Phase string
+	Rule  bool
+}
+
+// decisionsQ trả các lần đã chốt (bảng blocks) của ngày date theo StartS.
+func decisionsQ(q querier, date string) (map[int]decidedSlot, error) {
+	rows, err := q.Query(`SELECT slot_s, phase, state FROM blocks WHERE vday = ?`, date)
 	if err != nil {
 		return nil, fmt.Errorf("đọc lần đã chốt: %w", err)
 	}
 	defer rows.Close()
-	out := map[int]bool{}
+	out := map[int]decidedSlot{}
 	for rows.Next() {
 		var st int
-		if err := rows.Scan(&st); err != nil {
+		var phase, state string
+		if err := rows.Scan(&st, &phase, &state); err != nil {
 			return nil, fmt.Errorf("đọc lần đã chốt: %w", err)
 		}
-		out[st] = true
+		out[st] = decidedSlot{Phase: phase, Rule: state == blockRuleSkip}
 	}
 	return out, rows.Err()
+}
+
+// Decided trả các StartS đã chốt của ngày date (có dòng blocks: chốt/bỏ, kể cả phiên sau đó bị
+// huỷ), để scheduler khởi động lại không chốt lần nữa. Phiên "user huỷ trước giờ chốt" chưa phải
+// lần chốt nên không có ở đây: tới giờ vẫn chốt và trừ sổ như thường.
+func (s *Store) Decided(date string) (map[int]bool, error) {
+	ds, err := decisionsQ(s.db, date)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]bool, len(ds))
+	for st := range ds {
+		out[st] = true
+	}
+	return out, nil
 }
 
 // CloseDay đóng ngày Vrain vday (ghi tổng mưa cuối) và chuyển carryNextS sang carry_in của
@@ -250,7 +355,8 @@ func (s *Store) Provisional(date string, now time.Time, p Params) ([]Decision, e
 // dayPlan đọc trong một transaction (một ảnh chụp, không lẫn với lần chốt đang ghi) mọi phiên của
 // ngày date và tính bản tạm cho các lần chưa chốt: sổ của ngày Vrain date, mưa mới nhất (không có
 // ⇒ 0 mm), giả định S = 1. Lần có giờ chốt trước lúc bật tự động bị bỏ qua vì scheduler sẽ ghi
-// "bỏ" cho lần đó.
+// "bỏ" cho lần đó. Lần user huỷ trước giờ chốt vẫn được tính trong chuỗi sổ (tới giờ nó vẫn trừ
+// sổ) nhưng không có trong bản tạm trả về, nên không bao giờ gửi thiết bị.
 func (s *Store) dayPlan(date string, now time.Time, p Params) ([]Session, []Decision, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -261,15 +367,19 @@ func (s *Store) dayPlan(date string, now time.Time, p Params) ([]Session, []Deci
 	if err != nil {
 		return nil, nil, err
 	}
-	decided := map[int]bool{}
+	decided, err := decisionsQ(tx, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	cancelled := map[int]bool{}
 	for _, x := range ss {
-		if x.Source == sessionAuto {
-			decided[x.StartS] = true
+		if x.Source == sessionAuto && x.State == stateCancelled {
+			cancelled[x.StartS] = true
 		}
 	}
 	var pending []Slot
 	for _, sl := range sortedSlots(p.Slots) {
-		if decided[sl.StartS] {
+		if _, ok := decided[sl.StartS]; ok {
 			continue
 		}
 		at, err := decideAt(date, sl)
@@ -294,5 +404,11 @@ func (s *Store) dayPlan(date string, now time.Time, p Params) ([]Session, []Deci
 	} else if ok {
 		sum = r.SumDepthMM
 	}
-	return ss, provisional(l, pending, sum, p), nil
+	var prov []Decision
+	for _, d := range provisional(l, pending, sum, p) {
+		if !cancelled[d.Slot.StartS] {
+			prov = append(prov, d)
+		}
+	}
+	return ss, prov, nil
 }

@@ -65,7 +65,7 @@ docker compose up -d --build      # lắng nghe :8080 (HTTP)
 go test ./...                     # test (cần Go 1.24+)
 ```
 
-- Lần đầu chạy với DB trống, server nhập một lần `schedule.json`, `heartbeats.jsonl`, `events.jsonl` cũ trong thư mục dữ liệu (nếu có) vào SQLite. Các file cũ được giữ nguyên nhưng không còn được đọc/ghi.
+- Lần đầu chạy với DB trống, server nhập một lần `schedule.json`, `heartbeats.jsonl`, `events.jsonl` cũ trong thư mục dữ liệu (nếu có) vào SQLite. Các file cũ được giữ nguyên nhưng không còn được đọc/ghi. `data/schedule.example.json` chỉ là mẫu định dạng `schedule.json` cũ cho lần nhập này; lịch giờ sửa trên giao diện web.
 - Chưa có lịch dự phòng ⇒ server trả 503, thiết bị giữ lịch cũ; đặt lịch trên giao diện web là có hiệu lực ngay.
 - **Lịch tự động mặc định tắt**: thiết bị tưới theo lịch dự phòng (dòng 1) như trước. Bật ở mục "Thiết lập tự động" trên giao diện web; từ đó server lấy mưa trạm Vrain Đỗ Xuân Hợp và METAR Tân Sơn Nhất mỗi giờ (phút :09), chốt từng lần tưới 6 phút trước giờ tưới. Server cần ra được Internet (`data.vrain.vn`, `aviationweather.gov`).
 - Thuật toán, tham số và cách sinh 2 dòng lịch: [docs/system-design.md](docs/system-design.md), mục "Server: lịch tưới tự động".

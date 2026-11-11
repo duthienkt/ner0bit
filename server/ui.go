@@ -77,6 +77,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/events", s.api(s.handleEvents))
 	mux.HandleFunc("GET /api/day", s.api(s.handleDay))
 	mux.HandleFunc("POST /api/sessions/{id}/cancel", s.api(s.handleCancelSession))
+	mux.HandleFunc("POST /api/day/cancel-slot", s.api(s.handleCancelSlot))
 	mux.HandleFunc("GET /api/weather", s.api(s.handleWeather))
 	mux.HandleFunc("GET /api/settings", s.api(s.handleGetSettings))
 	mux.HandleFunc("PUT /api/settings", s.api(s.handlePutSettings))

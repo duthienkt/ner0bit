@@ -147,9 +147,12 @@ func (s *Store) Close() error { return s.db.Close() }
 const settingsParamsKey = "params"
 
 // Params trả tham số đã lưu; chưa có thì trả DefaultParams().
-func (s *Store) Params() (Params, error) {
+func (s *Store) Params() (Params, error) { return paramsQ(s.db) }
+
+// paramsQ đọc tham số qua q — DB hoặc transaction.
+func paramsQ(q querier) (Params, error) {
 	var raw string
-	err := s.db.QueryRow("SELECT value_json FROM settings WHERE key=?", settingsParamsKey).Scan(&raw)
+	err := q.QueryRow("SELECT value_json FROM settings WHERE key=?", settingsParamsKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultParams(), nil
 	}

@@ -581,6 +581,7 @@ func TestStateChangingRoutesNeedJSON(t *testing.T) {
 	id := autoSessions(t, s.Store, "2026-11-12")[0].ID
 	routes := []struct{ method, path, body string }{
 		{http.MethodPost, fmt.Sprintf("/api/sessions/%d/cancel", id), ""},
+		{http.MethodPost, "/api/day/cancel-slot", "date=2026-11-12&start_s=62100"},
 		{http.MethodPost, "/api/settings/daily-from-slots", ""},
 		{http.MethodPut, "/api/settings", "auto_enabled=false"},
 		{http.MethodPut, "/api/schedule", "daily=25200"},
@@ -676,8 +677,8 @@ func TestSlotMovedHeavyRainStillNoWater(t *testing.T) {
 }
 
 func TestSettingsOverflowCountsTodayLine(t *testing.T) {
-	// Hôm nay đã chốt 05:15; thêm 17 phiên bơm thử (3 + 17 = 20). Đổi 05:15 → 05:40 lúc 05:12
-	// ⇒ dòng 2 = 05:15 đã chốt + 05:40 + 06:15 + 17:15 + 17 = 21 mốc ⇒ phải từ chối.
+	// Hôm nay đã chốt 05:15; thêm 17 phiên bơm thử (3 + 17 = 20). Thêm lần thứ tư lúc 05:12
+	// ⇒ dòng 2 = 05:15 đã chốt + 06:15 + 12:30 + 17:15 + 17 = 21 mốc ⇒ phải từ chối.
 	s, _, now := newUIServer(t, threeSlots)
 	c := mustLogin(t, s)
 	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
@@ -690,18 +691,291 @@ func TestSettingsOverflowCountsTodayLine(t *testing.T) {
 	}
 	p := DefaultParams()
 	p.AutoEnabled = true
-	p.Slots = []Slot{{20400, "am"}, {22500, "am"}, {62100, "pm"}}
+	p.Slots = []Slot{{18900, "am"}, {22500, "am"}, {45000, "pm"}, {62100, "pm"}}
 	rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), testToday) {
 		t.Errorf("code %d body %s, muốn 400 nêu %s", rec.Code, rec.Body.String(), testToday)
 	}
-	// Không đổi 05:15 thì vẫn 20 mốc: được.
-	p.Slots[0] = Slot{18900, "am"}
+	// Dời 05:15 đã chốt → 05:40: 05:40 nhường cho 05:15 (R10) nên vẫn 20 mốc: được.
+	p.Slots = []Slot{{20400, "am"}, {22500, "am"}, {62100, "pm"}}
 	if rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p)); rec.Code != http.StatusOK {
-		t.Errorf("giữ slot: %d %s", rec.Code, rec.Body.String())
+		t.Errorf("dời slot đã chốt: %d %s", rec.Code, rec.Body.String())
+	}
+	body, _ := s.deviceBody(*now)
+	if _, line2, _ := strings.Cut(body, "\n"); len(strings.Split(line2, ",")) != 20 ||
+		!strings.HasPrefix(line2, "18900:360,22500:900,") || strings.Contains(line2, "20400:") {
+		t.Errorf("dòng 2 %q, muốn 20 mốc có 05:15 đã chốt, không có 05:40", line2)
 	}
 	// Phiên bơm thử thứ 18 hôm nay vượt 20.
 	if _, err := s.Store.AddManualSession(testToday, 50000, 60, ""); err == nil {
 		t.Error("phiên thứ 18 phải bị từ chối")
+	}
+}
+
+// ---- R10: dời lần đã chốt giữa ngày ----
+
+// slotMovedDay: mưa sum mm cả ngày 12/11; chốt 05:15 lúc 05:09; lúc 05:30 đổi các lần thành
+// {06:15, 07:00, 17:15}; chạy scheduler tới 17:20. Trả server và các phiên auto của ngày.
+func slotMovedDay(t *testing.T, sum float64) (*Server, []Session) {
+	t.Helper()
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	rain := &fakeRain{now: now, snaps: hourlySnaps(vt("2026-11-11", "20:07"), vt("2026-11-12", "19:07"),
+		func(time.Time) float64 { return sum })}
+	sc := &Scheduler{Store: s.Store, Rain: rain, Metar: &fakeMetar{now: now, obs: sunnyObs("2026-11-12")},
+		Now: func() time.Time { return *now }}
+	runTicks(t, sc, now, vt("2026-11-12", "05:00"), vt("2026-11-12", "05:29"))
+	*now = vt("2026-11-12", "05:30")
+	p := DefaultParams()
+	p.AutoEnabled = true
+	p.Slots = []Slot{{22500, "am"}, {25200, "am"}, {62100, "pm"}}
+	if rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+	if sum == 0 {
+		if body, _ := s.deviceBody(*now); body != threeSlots+"\n18900:900,25200:900,62100:900" {
+			t.Errorf("body lúc 05:30 %q: 06:15 phải nhường cho 05:15 đã chốt", body)
+		}
+	}
+	runTicks(t, sc, now, vt("2026-11-12", "05:30"), vt("2026-11-12", "17:20"))
+	return s, autoSessions(t, s.Store, "2026-11-12")
+}
+
+func TestSlotMovedDecidedPairsHeavyRain(t *testing.T) {
+	// Mưa 12 mm (≥ rain_hi): dời 05:15 đã chốt sang {06:15, 07:00, 17:15} không làm lần nào tưới.
+	s, got := slotMovedDay(t, 12)
+	if len(got) != 4 {
+		t.Fatalf("phiên auto: %+v", got)
+	}
+	for _, x := range got {
+		if x.RunS != 0 {
+			t.Errorf("lần %s tưới %d giây dù mưa 12 mm: %s", hms(x.StartS), x.RunS, x.Reason)
+		}
+	}
+	if got[1].StartS != 22500 || got[1].State != stateSkipped || got[1].Reason != "đã chốt ở giờ cũ 05:15" {
+		t.Errorf("06:15 phải bỏ vì 05:15 đã chốt: %+v", got[1])
+	}
+	if l, _, _ := s.Store.Ledger("2026-11-12"); l.UsedRainS != 2700 {
+		t.Errorf("used_rain %v, muốn 2700 (đúng quota)", l.UsedRainS)
+	}
+}
+
+func TestSlotMovedDecidedPairsDryDay(t *testing.T) {
+	// Ngày khô: vẫn đúng 3 lần × 15 phút = 2700 giây, không thành 4 lần.
+	_, got := slotMovedDay(t, 0)
+	total := 0
+	for _, x := range got {
+		if x.State == stateFinal {
+			total += x.RunS
+		}
+	}
+	if total != 2700 {
+		t.Errorf("tổng tưới tự động %d giây, muốn 2700: %+v", total, got)
+	}
+	checkStarts := []int{18900, 22500, 25200, 62100}
+	wantRuns := []int{900, 0, 900, 900}
+	if len(got) != len(checkStarts) {
+		t.Fatalf("phiên auto: %+v", got)
+	}
+	for i, x := range got {
+		if x.StartS != checkStarts[i] || x.RunS != wantRuns[i] {
+			t.Errorf("phiên %d = %d:%d, muốn %d:%d", i, x.StartS, x.RunS, checkStarts[i], wantRuns[i])
+		}
+	}
+}
+
+// ---- R11: huỷ trước giờ chốt ----
+
+func cancelSlot(t *testing.T, s *Server, c *http.Cookie, date string, startS int) *httptest.ResponseRecorder {
+	t.Helper()
+	return apiDo(t, s, c, http.MethodPost, "/api/day/cancel-slot", fmt.Sprintf(`{"date":%q,"start_s":%d}`, date, startS))
+}
+
+func TestCancelSlotBeforeDecision(t *testing.T) {
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	// Khô tới 15:07, từ 16:07 là 5.5 mm ⇒ lúc 17:09 lần 17:15 dùng 270 giây miễn, tưới 11 phút (làm tròn).
+	rain := &fakeRain{now: now, snaps: hourlySnaps(vt("2026-11-11", "20:07"), vt("2026-11-12", "19:07"),
+		func(tm time.Time) float64 {
+			if tm.Day() == 12 && tm.Hour() >= 16 {
+				return 5.5
+			}
+			return 0
+		})}
+	sc := &Scheduler{Store: s.Store, Rain: rain, Metar: &fakeMetar{now: now, obs: sunnyObs("2026-11-12")},
+		Now: func() time.Time { return *now }}
+	runTicks(t, sc, now, vt("2026-11-12", "04:00"), vt("2026-11-12", "14:00"))
+
+	if rec := cancelSlot(t, s, c, testToday, 62100); rec.Code != http.StatusOK {
+		t.Fatalf("huỷ 17:15 lúc 14:00: %d %s", rec.Code, rec.Body.String())
+	}
+	want := threeSlots + "\n18900:900,22500:900"
+	if body, err := s.deviceBody(*now); err != nil || body != want {
+		t.Errorf("body ngay sau huỷ %q (%v), muốn %q", body, err, want)
+	}
+	d := getDay(t, s, c, "")
+	if len(d.Provisional) != 0 {
+		t.Errorf("bản tạm còn: %+v", d.Provisional)
+	}
+	var intent *Session
+	for i, x := range d.Sessions {
+		if x.Source == sessionAuto && x.StartS == 62100 {
+			intent = &d.Sessions[i]
+		}
+	}
+	if intent == nil || intent.State != stateCancelled || intent.RunS != 0 || intent.Reason != "user huỷ trước giờ chốt" {
+		t.Fatalf("phiên huỷ trước: %+v", intent)
+	}
+	if rec := cancelSlot(t, s, c, testToday, 62100); rec.Code != http.StatusBadRequest {
+		t.Errorf("huỷ lần hai: %d, muốn 400", rec.Code)
+	}
+
+	runTicks(t, sc, now, vt("2026-11-12", "14:01"), vt("2026-11-12", "17:20"))
+	var n int
+	if err := s.Store.db.QueryRow(`SELECT count(*) FROM blocks WHERE vday = ? AND slot_s = 62100 AND run_s = 660 AND state = ?`,
+		testToday, stateFinal).Scan(&n); err != nil || n != 1 {
+		t.Errorf("blocks của 17:15: %d dòng (%v), muốn 1 dòng chốt 660 giây", n, err)
+	}
+	if l, _, _ := s.Store.Ledger(testToday); l.UsedRainS != 270 {
+		t.Errorf("used_rain %v, muốn 270 (chốt như bình thường)", l.UsedRainS)
+	}
+	var pm []Session
+	for _, x := range autoSessions(t, s.Store, testToday) {
+		if x.StartS == 62100 {
+			pm = append(pm, x)
+		}
+	}
+	if len(pm) != 1 || pm[0].State != stateCancelled || pm[0].RunS != 660 || !strings.HasPrefix(pm[0].Reason, "đã huỷ — ") {
+		t.Errorf("phiên 17:15 sau giờ chốt: %+v", pm)
+	}
+	if body, err := s.deviceBody(*now); err != nil || body != want {
+		t.Errorf("body sau giờ chốt %q (%v), muốn %q", body, err, want)
+	}
+}
+
+func TestCancelSlotFutureDate(t *testing.T) {
+	s, _, now := newUIServer(t, threeSlots) // 08:00 ngày 12
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	if rec := cancelSlot(t, s, c, "2026-11-13", 22500); rec.Code != http.StatusOK {
+		t.Fatalf("huỷ 06:15 ngày mai: %d %s", rec.Code, rec.Body.String())
+	}
+	d := getDay(t, s, c, "?date=2026-11-13")
+	var starts []int
+	for _, x := range d.Provisional {
+		starts = append(starts, x.Slot.StartS)
+	}
+	if fmt.Sprint(starts) != "[18900 62100]" {
+		t.Errorf("bản tạm ngày mai %v, muốn [18900 62100]", starts)
+	}
+	rain := &fakeRain{now: now, snaps: hourlySnaps(vt("2026-11-12", "20:07"), vt("2026-11-13", "19:07"),
+		func(time.Time) float64 { return 0 })}
+	sc := &Scheduler{Store: s.Store, Rain: rain, Now: func() time.Time { return *now }}
+	runTicks(t, sc, now, vt("2026-11-13", "04:00"), vt("2026-11-13", "06:20"))
+	if body, err := s.deviceBody(*now); err != nil || body != threeSlots+"\n18900:900,62100:900" {
+		t.Errorf("body ngày 13 lúc 06:20 %q (%v)", body, err)
+	}
+	got := autoSessions(t, s.Store, "2026-11-13")
+	if len(got) != 2 || got[1].StartS != 22500 || got[1].State != stateCancelled || got[1].RunS != 900 {
+		t.Errorf("phiên ngày 13: %+v", got)
+	}
+}
+
+func TestCancelSlotDecidedFinal(t *testing.T) {
+	// UI hiện bản tạm lúc 05:08, user bấm lúc 05:12 khi 05:15 vừa chốt: huỷ luôn phiên đã chốt.
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	decide05(t, s)
+	*now = vt("2026-11-12", "05:12")
+	if rec := cancelSlot(t, s, c, testToday, 18900); rec.Code != http.StatusOK {
+		t.Fatalf("huỷ 05:15 đã chốt: %d %s", rec.Code, rec.Body.String())
+	}
+	got := autoSessions(t, s.Store, testToday)
+	if len(got) != 1 || got[0].State != stateCancelled || got[0].RunS != 360 {
+		t.Errorf("phiên: %+v", got)
+	}
+}
+
+func TestCancelSlotRejects(t *testing.T) {
+	s, _, _ := newUIServer(t, threeSlots) // 08:00 ngày 12
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	cases := []struct{ name, body, want string }{
+		{"đã qua giờ tưới", `{"date":"2026-11-12","start_s":18900}`, "đã qua giờ tưới"},
+		{"ngày đã qua", `{"date":"2026-11-11","start_s":62100}`, "đã qua giờ tưới"},
+		{"không phải lần tự động", `{"date":"2026-11-12","start_s":40000}`, "Không có lần tự động"},
+		{"ngày hỏng", `{"date":"12/11/2026","start_s":62100}`, "YYYY-MM-DD"},
+		{"trường lạ", `{"date":"2026-11-12","start_s":62100,"x":1}`, "JSON sai"},
+	}
+	for _, tc := range cases {
+		rec := apiDo(t, s, c, http.MethodPost, "/api/day/cancel-slot", tc.body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s, muốn 400 %q", tc.name, rec.Code, rec.Body.String(), tc.want)
+		}
+	}
+	p := DefaultParams() // tắt tự động
+	if err := s.Store.SetParams(p); err != nil {
+		t.Fatal(err)
+	}
+	if rec := cancelSlot(t, s, c, testToday, 62100); rec.Code != http.StatusBadRequest {
+		t.Errorf("tắt tự động: %d %s, muốn 400", rec.Code, rec.Body.String())
+	}
+	if ss, _ := s.Store.Sessions(testToday); len(ss) != 0 {
+		t.Errorf("bị từ chối mà vẫn ghi phiên: %+v", ss)
+	}
+	if ss, _ := s.Store.Sessions("2026-11-11"); len(ss) != 0 {
+		t.Errorf("bị từ chối mà vẫn ghi phiên: %+v", ss)
+	}
+}
+
+func TestSlotSkipsPairing(t *testing.T) {
+	on := func(at time.Time, starts ...int) Params {
+		p := DefaultParams()
+		p.AutoEnabled, p.AutoEnabledAt, p.Slots = true, at, nil
+		for _, st := range starts {
+			ph := "am"
+			if st >= 12*3600 {
+				ph = "pm"
+			}
+			p.Slots = append(p.Slots, Slot{st, ph})
+		}
+		return p
+	}
+	off := func(p Params) Params { p.AutoEnabled = false; return p }
+	long := vt("2026-11-01", "00:00")
+	real := func(ph string) decidedSlot { return decidedSlot{Phase: ph} }
+	rule := decidedSlot{Phase: "am", Rule: true}
+	cases := []struct {
+		name      string
+		cur, next Params
+		now       string
+		decided   map[int]decidedSlot
+		want      string
+	}{
+		{"dời 05:15 đã chốt, lần mới chưa tới giờ chốt", on(long, 18900, 22500, 62100), on(long, 22500, 25200, 62100), "05:30",
+			map[int]decidedSlot{18900: real("am")}, "[{22500 đã chốt ở giờ cũ 05:15}]"},
+		{"lần mới đã qua giờ chốt đã đủ chỗ", on(long, 18900, 22500, 62100), on(long, 19200, 22500, 62100), "05:30",
+			map[int]decidedSlot{18900: real("am")}, "[{19200 đổi lịch sau giờ chốt}]"},
+		{"không còn lần sáng ⇒ lấy lần gần nhất buổi khác", on(long, 18900, 22500, 62100), on(long, 50400, 62100), "06:30",
+			map[int]decidedSlot{18900: real("am"), 22500: real("am")}, "[{50400 đã chốt ở giờ cũ 05:15} {62100 đã chốt ở giờ cũ 06:15}]"},
+		{"dời lần hai: lần đã nhường không tính là chốt thật", on(long, 22500, 25200, 62100), on(long, 23400, 25200, 62100), "05:40",
+			map[int]decidedSlot{18900: real("am"), 22500: rule}, "[{23400 đã chốt ở giờ cũ 05:15}]"},
+		{"bật lại: lần bỏ vì bật sau giờ chốt đã đủ chỗ", off(on(long, 18900, 22500, 62100)), on(vt(testToday, "05:50"), 19800, 25200, 62100), "05:50",
+			map[int]decidedSlot{18900: real("am")}, "[]"},
+		{"tắt tự động ⇒ không ghi gì", on(long, 18900, 22500, 62100), DefaultParams(), "05:30",
+			map[int]decidedSlot{18900: real("am")}, "[]"},
+	}
+	for _, tc := range cases {
+		got, err := slotSkips(tc.cur, tc.next, testToday, vt(testToday, tc.now), tc.decided)
+		var parts []string
+		for _, sk := range got {
+			parts = append(parts, fmt.Sprintf("{%d %s}", sk.Slot.StartS, sk.Reason))
+		}
+		if s := "[" + strings.Join(parts, " ") + "]"; err != nil || s != tc.want {
+			t.Errorf("%s: %s (%v), muốn %s", tc.name, s, err, tc.want)
+		}
 	}
 }

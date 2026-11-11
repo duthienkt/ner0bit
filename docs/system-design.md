@@ -299,7 +299,7 @@ Cấu hình (WiFi, Server URL, Token) **luôn ở NVS**, không bao giờ chép 
 
 Server là một binary Go: HTTP (thiết bị + giao diện web), một goroutine nền lập lịch, dữ liệu trong **SQLite** (`modernc.org/sqlite`, thuần Go, chế độ WAL). File DB là `NER0BIT_DB`, mặc định `$NER0BIT_DATA_DIR/ner0bit.db`.
 
-- Lần đầu chạy với DB trống: nhập một lần `schedule.json` (`daily` ⇒ lịch dự phòng; mốc riêng theo ngày ⇒ phiên bơm thử), `heartbeats.jsonl`, `events.jsonl`. File cũ giữ nguyên để còn đường quay lại, nhưng server không đọc/ghi chúng nữa.
+- Lần đầu chạy với DB trống: nhập một lần `schedule.json` (`daily` ⇒ lịch dự phòng; mốc riêng theo ngày ⇒ phiên bơm thử), `heartbeats.jsonl`, `events.jsonl`. File cũ giữ nguyên để còn đường quay lại, nhưng server không đọc/ghi chúng nữa. `server/data/schedule.example.json` chỉ là mẫu định dạng `schedule.json` cũ cho lần nhập này; lịch giờ sửa trên giao diện web.
 - Chế độ tự động **mặc định tắt**; bật trên giao diện web. Lúc tắt, thiết bị nhận đúng lịch như trước (dòng 1 = lịch dự phòng).
 - Thiếu số liệu thì **nghiêng về tưới**: không có số mưa ⇒ coi 0 mm; thiếu METAR ⇒ coi trời nắng đủ.
 - Mọi giờ theo giờ VN; thời lượng tính bằng giây, giao diện hiện phút.
@@ -309,14 +309,14 @@ Server là một binary Go: HTTP (thiết bị + giao diện web), một gorouti
 - `GET https://data.vrain.vn/public/current/56.json`, lấy trạm `726096c3-2ede-47f1-827e-0dc1ffe8d897` (Đỗ Xuân Hợp, phường Phước Long, ngay tại nhà).
 - **`sumDepth` là mưa cộng dồn từ 19h hôm trước tới hiện tại.** Số về lại ở bản **20:07** (bản 19:07 vẫn là tổng ngày cũ). Giờ của dữ liệu lấy từ header `Last-Modified`, luôn rơi vào phút :07.
 - **Ngày Vrain** của một bản đọc lúc `t`: giờ ≥ 20 ⇒ ngày hôm sau, ngược lại ⇒ cùng ngày. Ngày D gồm các bản từ 20:07 của D−1 tới 19:07 của D, nên chứa đủ các lần tưới 04:15–18:45 của ngày D.
-- Lấy mỗi giờ ở phút **:09**; chưa có bản giờ này thì thử lại mỗi phút tới **:11**, quá hạn thì giữ bản cũ và ghi cảnh báo "Vrain trễ". Trả 200 mà dữ liệu hỏng (thiếu trạm, `sumDepth` null, thiếu `Last-Modified`) ⇒ không ghi gì (không bao giờ ghi số 0 giả), chỉ cảnh báo.
+- Lấy mỗi giờ ở phút **:09**; chưa có bản giờ này thì thử lại mỗi phút tới **:11**, quá hạn thì giữ bản cũ và ghi cảnh báo "Vrain trễ". Chốt một lần tưới ngoài phút :09–:11 (chốt bù sau khi server khởi động lại, hoặc giờ tưới không rơi vào :15) mà chưa có bản mới nhất thì lấy Vrain thêm một lần ngay trước khi chốt. Trả 200 mà dữ liệu hỏng (thiếu trạm, `sumDepth` null, thiếu `Last-Modified`) ⇒ không ghi gì (không bao giờ ghi số 0 giả), chỉ cảnh báo.
 - Cảnh báo khi `sumDepth` giảm trong cùng một ngày Vrain, hoặc sang ngày mới ở giờ khác 20h.
 - Ngày Vrain được **đóng** khi có bản của ngày sau (20:07), hoặc lúc 20:12 nếu không có bản 20:07 (dùng bản cuối cùng).
 
 ### Số liệu nắng: METAR Tân Sơn Nhất
 
 - `GET https://aviationweather.gov/api/data/metar?ids=VVTS&format=json&hours=36` mỗi giờ ở phút :09; lưu nhiệt độ, điểm sương, mây, bản tin gốc.
-- Bốc hơi ngày D tính lúc chốt lần buổi chiều bằng **Hargreaves (FAO-56)** từ quan trắc 00:00–17:00 của ngày D, vĩ độ 10.8136°: $ET = 0.0023\cdot R_a\cdot(T_{tb}+17.8)\cdot\sqrt{T_{max}-T_{min}}$.
+- Bốc hơi ngày D tính lúc chốt lần buổi chiều bằng **Hargreaves (FAO-56)** từ các quan trắc trong khoảng [00:00, 17:00) của ngày D (quan trắc đúng 17:00 không tính), vĩ độ 10.8136°: $ET = 0.0023\cdot R_a\cdot(T_{tb}+17.8)\cdot\sqrt{T_{max}-T_{min}}$.
 - **Hệ số nắng** $S = \min(1,\ ET / e\_ref)$. Dưới 12 quan trắc ⇒ S = 1 (không trừ) và ghi cảnh báo.
 
 ### Quota và phút được miễn
@@ -349,6 +349,7 @@ run         = block − phần đã dùng, làm tròn phút;  run < min_run ⇒ 
 - **Bản tạm**: các lần chưa chốt được tính lại mỗi khi thiết bị hỏi, cùng công thức, giả định không mưa thêm và S = 1. Lý do: dòng 2 thay hoàn toàn dòng 1 — nếu dòng 2 chỉ có các lần đã chốt mà server chết, thiết bị sẽ mất các lần còn lại trong ngày.
 - Mỗi lần chốt lưu kèm đầu vào (mưa, M, các phần `avail`, S, ET, cảnh báo) và một dòng lý do, ví dụ "mưa 6.2 mm từ 19h ⇒ miễn 11 phút; tưới 4 phút".
 - Bật tự động giữa ngày: các lần đã qua giờ chốt của hôm nay được ghi "bỏ" (lý do "bật tự động sau giờ chốt"), các lần sau tính bình thường. Đổi tham số giữa ngày: lần đã chốt giữ nguyên, lần chưa chốt dùng tham số mới. Lần **mới** (giờ chưa có trong danh sách cũ) mà giờ chốt hôm nay đã qua lúc lưu ⇒ hôm nay ghi "bỏ" (lý do "đổi lịch sau giờ chốt"), không chốt bù, sổ giữ nguyên — tránh tưới thêm một block hay dùng phút miễn lần nữa (ví dụ dời 05:15 → 05:20 lúc 05:30 sau khi đã chốt 05:15).
+- Hôm nay không bao giờ có quá `số lần` lần tưới tự động (đã chốt + chưa chốt): lần **đã chốt** mà giờ không còn trong danh sách mới vẫn tính là một lần của hôm nay. Khi lưu tham số (cùng transaction), mỗi lần như vậy lấy lần **chưa chốt** gần nhất (theo giờ) cùng buổi trong danh sách mới, không có thì gần nhất buổi bất kỳ, và ghi lần đó "bỏ" (lý do "đã chốt ở giờ cũ HH:MM"), sổ giữ nguyên. Các lần của danh sách mới đã/sắp bị "bỏ" theo luật (đổi lịch sau giờ chốt, bật sau giờ chốt, lần nhường trước đó) được tính là chỗ đã dùng, nên không bỏ thêm. Ví dụ đã chốt 05:15, lúc 05:30 đổi thành 06:15/07:00/17:15 ⇒ 06:15 "bỏ", hôm nay vẫn đúng 3 lần.
 
 ### Lịch dự phòng và lịch tưới theo ngày
 
@@ -358,17 +359,17 @@ Lịch kiểu "event calendar":
 - **Lịch tưới** của mỗi ngày là danh sách **phiên** `{giờ, thời lượng, nguồn, trạng thái}`:
   - Nguồn `auto`: planner thêm phiên lúc chốt. `run = 0` vẫn lưu với trạng thái "bỏ" kèm lý do, nhưng không gửi thiết bị.
   - Nguồn `manual` (bơm thử): người dùng thêm cho hôm nay hoặc ngày tới (giờ, thời lượng ≤ 30 phút, ghi chú) và xoá được. Chỉ cộng thêm, không đụng phiên khác, không đụng sổ phút miễn. Phiên sát phiên khác (< `block` + 3 phút) chỉ cảnh báo, vẫn lưu — firmware sẽ bỏ lần sau với lý do `busy`/`rest`.
-  - Người dùng **huỷ** được phiên `auto` đã chốt mà **chưa tới giờ tưới** (ví dụ biết trước sẽ mưa): phiên giữ lại với trạng thái "đã huỷ", sổ phút miễn tính như đã tưới. Phiên đã bắt đầu thì không huỷ (thiết bị luôn chạy nốt phiên đang chạy).
+  - Người dùng **huỷ** được một lần `auto` **chưa tới giờ tưới** (ví dụ biết trước sẽ mưa), của hôm nay hay ngày tới, đã chốt hay chưa: phiên giữ lại với trạng thái "đã huỷ", không gửi thiết bị (dòng 2 bỏ ngay), sổ phút miễn tính như đã tưới. Huỷ khi **chưa chốt** ⇒ lưu ngay một phiên "đã huỷ" (run 0, lý do "user huỷ trước giờ chốt"); tới giờ chốt planner vẫn chốt và trừ sổ như thường, phiên giữ trạng thái "đã huỷ" và nhận run/lý do vừa tính (lý do có tiền tố "đã huỷ — "); lần đó bị "bỏ" theo luật (bật sau giờ chốt, đổi lịch) thì vẫn "đã huỷ", sổ giữ nguyên. Phiên đã bắt đầu thì không huỷ (thiết bị luôn chạy nốt phiên đang chạy). Không có "bỏ huỷ".
 - **Body trả thiết bị**:
-  - Tự động **bật**: dòng 1 = `daily`; dòng 2 = phiên `auto` đã chốt có `run > 0` và không bị huỷ ∪ phiên `manual` ∪ bản tạm có `run > 0` của các lần chưa chốt, sắp theo giờ. Rỗng ⇒ dòng 2 rỗng (hôm nay không tưới). Giữ cả phiên đã qua giờ: thiết bị bỏ qua khung đã qua, không tưới bù.
+  - Tự động **bật**: dòng 1 = `daily`; dòng 2 = phiên `auto` đã chốt có `run > 0` và không bị huỷ ∪ phiên `manual` ∪ bản tạm có `run > 0` của các lần chưa chốt và chưa bị huỷ, sắp theo giờ. Rỗng ⇒ dòng 2 rỗng (hôm nay không tưới). Giữ cả phiên đã qua giờ: thiết bị bỏ qua khung đã qua, không tưới bù.
   - Tự động **tắt**: chỉ dòng 1; có phiên bơm thử hôm nay thì thêm dòng 2 = `daily` ∪ phiên `manual`.
-  - Mỗi dòng ≤ 20 mốc: thêm phiên bơm thử, đổi `daily` hay đổi các lần tự động đều bị từ chối nếu làm một ngày từ hôm nay vượt max(mốc `daily`, phiên `auto` đã chốt có `run > 0` + các lần tự động chưa chốt) + phiên bơm thử > 20. Ngày chưa có phiên `auto` nào thì là max(mốc `daily`, số lần tự động).
+  - Mỗi dòng ≤ 20 mốc: thêm phiên bơm thử, đổi `daily` hay đổi các lần tự động đều bị từ chối nếu làm một ngày từ hôm nay vượt max(mốc `daily`, phiên `auto` đã chốt có `run > 0` + các lần tự động chưa chốt và chưa bị huỷ) + phiên bơm thử > 20. Ngày chưa có phiên `auto` nào thì là max(mốc `daily`, số lần tự động). Phòng hờ (dữ liệu nhập từ bản cũ, sửa tay DB, đua đọc/ghi): dòng nào vẫn quá 20 mốc thì chỉ gửi 20 mốc sớm nhất, log và ghi cảnh báo (tối đa một lần mỗi giờ).
   - Lỗi DB ⇒ 503: thiết bị giữ lịch cache và events, gửi lại lần sau.
 - Lịch các ngày đã qua giữ lại làm lịch sử, xem lại được trên giao diện.
 
 ### Giao diện web và API
 
-Giao diện (`server/ui/index.html`) có các mục: trạng thái thiết bị; **Hôm nay** (mỗi lần tưới một hàng: giờ, phút, nguồn, trạng thái, lý do; bản tạm in nghiêng; nút "Huỷ" cho phiên tự động; mưa và nhiệt độ 48 giờ; tưới thử); **Lịch tưới** (chọn ngày, thêm/xoá phiên bơm thử, cảnh báo); **Thiết lập tự động** (bật/tắt và các tham số trên); **Lịch dự phòng**; hoạt động gần đây.
+Giao diện (`server/ui/index.html`) có các mục: trạng thái thiết bị; **Hôm nay** (mỗi lần tưới một hàng: giờ, phút, nguồn, trạng thái, lý do; bản tạm in nghiêng; nút "Huỷ" cho phiên tự động, kể cả bản tạm chưa chốt; mưa và nhiệt độ 48 giờ; tưới thử); **Lịch tưới** (chọn ngày, thêm/xoá phiên bơm thử, cảnh báo); **Thiết lập tự động** (bật/tắt và các tham số trên); **Lịch dự phòng**; hoạt động gần đây.
 
 API JSON (đăng nhập bằng cookie; mọi request ghi trừ `DELETE` phải gửi `Content-Type: application/json`, kể cả POST không có dữ liệu — chống CSRF cùng cookie `SameSite=Strict`):
 
@@ -379,6 +380,7 @@ API JSON (đăng nhập bằng cookie; mọi request ghi trừ `DELETE` phải g
 | `GET /api/day?date=YYYY-MM-DD` | Lịch tưới của ngày: `sessions`, `provisional` (bản tạm), `ledger` (sổ), `sum_mm` (mưa cộng dồn mới nhất), `warnings`, `device_body` (chỉ hôm nay) |
 | `POST /api/sessions`, `DELETE /api/sessions/{id}` | Thêm / xoá phiên bơm thử |
 | `POST /api/sessions/{id}/cancel` | Huỷ phiên tự động đã chốt, chưa tới giờ tưới |
+| `POST /api/day/cancel-slot` | `{"date": "YYYY-MM-DD", "start_s": 62100}`: huỷ một lần tự động chưa tới giờ tưới của hôm nay/ngày tới, kể cả khi chưa chốt (tự động phải đang bật) |
 | `GET /api/weather?hours=48` | Bản Vrain (kèm mưa từng giờ) và METAR, tối đa 168 giờ |
 | `GET\|PUT /api/settings` | Tham số tự động + quota, per_mm, lịch dự phòng có khớp các lần tự động không. Server tự đặt thời điểm bật (`auto_enabled_at`) |
 | `POST /api/settings/daily-from-slots` | Đặt lịch dự phòng = các lần tự động, mỗi lần đủ `block` |

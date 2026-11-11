@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,5 +202,47 @@ func TestPutScheduleRejectsOverflowWithManual(t *testing.T) {
 	}
 	if rec := put(strings.TrimSuffix(strings.Repeat("100:60,", 17), ",")); rec.Code != 200 { // 17 + 3 = 20
 		t.Errorf("vừa đủ 20: code %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeviceBodyCapsLinesAt20(t *testing.T) {
+	// Đường cũ (nhập dữ liệu, đua đọc/ghi) có thể để dòng 2 quá 20 mốc: chỉ gửi 20 mốc sớm nhất,
+	// cảnh báo một lần mỗi giờ.
+	s, _, now := newUIServer(t, threeSlots)
+	for i := 0; i < 20; i++ {
+		if _, err := insertManualSessionRaw(s.Store.db, testToday, 30000+i*600, 60, "", *now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []entry{{18900, 900}, {22500, 900}}
+	for i := 0; i < 18; i++ {
+		want = append(want, entry{30000 + i*600, 60})
+	}
+	for i := 0; i < 2; i++ {
+		body, err := s.deviceBody(*now)
+		if err != nil || body != threeSlots+"\n"+renderLine(want) {
+			t.Errorf("body %q (%v), muốn 20 mốc sớm nhất", body, err)
+		}
+	}
+	if n := warningsLike(t, s.Store, "vượt 20"); n != 1 {
+		t.Errorf("%d cảnh báo vượt 20 mốc, muốn 1", n)
+	}
+	if d := getDay(t, s, mustLogin(t, s), ""); !strings.Contains(strings.Join(d.Warnings, "|"), "vượt 20") {
+		t.Errorf("/api/day không nêu cảnh báo: %v", d.Warnings)
+	}
+
+	// Dòng 1 (daily) quá 20 mốc (sửa tay DB): cũng chỉ gửi 20 mốc sớm nhất.
+	s2, _, now2 := newUIServer(t, threeSlots)
+	var toks []string
+	for i := 21; i >= 0; i-- {
+		toks = append(toks, fmt.Sprintf("%d:60", 30000+i*600))
+	}
+	if _, err := s2.Store.db.Exec(`UPDATE schedule_daily SET line = ? WHERE id = 1`, strings.Join(toks, ",")); err != nil {
+		t.Fatal(err)
+	}
+	body, err := s2.deviceBody(*now2)
+	if err != nil || strings.Contains(body, "\n") || len(strings.Split(body, ",")) != 20 ||
+		!strings.HasPrefix(body, "30000:60,") || strings.Contains(body, "42600") {
+		t.Errorf("dòng 1 %q (%v), muốn 20 mốc sớm nhất", body, err)
 	}
 }

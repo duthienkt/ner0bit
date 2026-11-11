@@ -46,6 +46,9 @@ type Server struct {
 
 	schedMu   sync.Mutex        // giữ lastSched
 	lastSched map[string]string // body lịch trả gần nhất theo id, để nhận ra lịch mới
+
+	capMu         sync.Mutex // giữ capWarnedHour
+	capWarnedHour string     // giờ ("YYYY-MM-DD HH") đã ghi cảnh báo dòng lịch quá 20 mốc
 }
 
 type lastHeartbeat struct {

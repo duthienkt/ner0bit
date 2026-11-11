@@ -729,3 +729,67 @@ func TestCloseDayUpdatesExistingNextRow(t *testing.T) {
 		t.Errorf("sổ 03/11 = %+v %v %v, muốn carry 1800, used_rain %v giữ nguyên", got, ok, err, l.UsedRainS)
 	}
 }
+
+func TestSchedulerCatchUpFetchesVrain(t *testing.T) {
+	// Khởi động lại lúc 05:40 (ngoài phút :09–:11): lấy Vrain một lần rồi mới chốt bù 05:15,
+	// không chốt bằng bản cũ 04:07 và không cảnh báo "Vrain trễ".
+	st := openTestStore(t)
+	autoParams(t, st, vt("2026-11-01", "00:00"))
+	st.InsertRainSnapshot(RainSnapshot{DataTS: vt("2026-11-12", "04:07"), FetchedAt: vt("2026-11-12", "04:09")})
+	clock := vt("2026-11-12", "05:40")
+	rain := &fakeRain{now: &clock, snaps: []fakeSnap{
+		{vt("2026-11-12", "05:07"), RainSnapshot{DataTS: vt("2026-11-12", "05:07"), SumDepthMM: 12}}}}
+	sc := &Scheduler{Store: st, Rain: rain, Now: func() time.Time { return clock }}
+	runTicks(t, sc, &clock, clock, clock)
+	got := autoSessions(t, st, "2026-11-12")
+	if len(got) != 1 || got[0].StartS != 18900 || got[0].RunS != 0 {
+		t.Errorf("05:15 phải chốt bằng bản 05:07 (12 mm ⇒ không tưới): %+v", got)
+	}
+	if n := warningsLike(t, st, "Vrain trễ"); n != 0 {
+		t.Errorf("%d cảnh báo Vrain trễ, muốn 0", n)
+	}
+	if rain.calls != 1 {
+		t.Errorf("gọi Vrain %d lần, muốn 1", rain.calls)
+	}
+
+	// Vrain lỗi: khởi động lại lúc 07:05 chốt bù 05:15 và 06:15, chỉ thử Vrain một lần, một cảnh báo.
+	st2 := openTestStore(t)
+	autoParams(t, st2, vt("2026-11-01", "00:00"))
+	clock = vt("2026-11-12", "07:05")
+	rain2 := &fakeRain{now: &clock, fail: true}
+	sc2 := &Scheduler{Store: st2, Rain: rain2, Now: func() time.Time { return clock }}
+	runTicks(t, sc2, &clock, clock, clock)
+	if got := autoSessions(t, st2, "2026-11-12"); len(got) != 2 {
+		t.Errorf("phiên chốt bù: %+v", got)
+	}
+	if rain2.calls != 1 {
+		t.Errorf("gọi Vrain %d lần, muốn 1", rain2.calls)
+	}
+	if n := warningsLike(t, st2, "Vrain"); n != 1 {
+		t.Errorf("%d cảnh báo Vrain, muốn 1 (một lần mỗi giờ)", n)
+	}
+}
+
+func TestCancelIntentThenLateEnableStaysCancelled(t *testing.T) {
+	// Huỷ trước 05:15 ngày 13, rồi bật lại tự động lúc 05:30 ngày 13 ⇒ 05:15 bị bỏ (bật sau giờ
+	// chốt): phiên vẫn "đã huỷ", một dòng duy nhất, sổ không đổi.
+	st := openTestStore(t)
+	autoParams(t, st, vt("2026-11-01", "00:00"))
+	if err := st.CancelAutoSlot("2026-11-13", 18900, vt("2026-11-12", "10:00")); err != nil {
+		t.Fatal(err)
+	}
+	autoParams(t, st, vt("2026-11-13", "05:30"))
+	clock := vt("2026-11-13", "05:30")
+	sc := &Scheduler{Store: st, Now: func() time.Time { return clock }}
+	runTicks(t, sc, &clock, clock, clock)
+	got := autoSessions(t, st, "2026-11-13")
+	if len(got) != 1 || got[0].State != stateCancelled || got[0].RunS != 0 || !strings.Contains(got[0].Reason, reasonLateEnable) {
+		t.Errorf("phiên: %+v", got)
+	}
+	if l, _, _ := st.Ledger("2026-11-13"); l.UsedRainS != 0 || l.UsedCarryS != 0 || l.UsedSunS != 0 {
+		t.Errorf("sổ bị trừ: %+v", l)
+	}
+	if d, _ := st.Decided("2026-11-13"); !d[18900] {
+		t.Errorf("Decided %v, muốn có 18900 (đã bỏ)", d)
+	}
+}

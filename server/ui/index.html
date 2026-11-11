@@ -867,6 +867,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       var act = null;
       if (editable && r.kind === 'auto' && r.state === 'final' && !started(r)) {
         act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { cancelSession(r); } }, 'Huỷ');
+      } else if (editable && r.state === 'provisional' && !started(r)) {
+        act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { cancelSlot(day.date, r); } }, 'Huỷ');
       } else if (editable && r.kind === 'manual') {
         act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { deleteSession(r); } }, 'Xoá');
       }
@@ -897,6 +899,16 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   function cancelSession(r) {
     if (!confirm('Huỷ lần tưới tự động ' + hm(r.sec) + '? Sổ phút miễn vẫn tính như đã tưới.')) return;
     send('POST', '/api/sessions/' + r.id + '/cancel').then(function (res) {
+      if (!res.ok) return;
+      savedAt = nowMs();
+      toast('Đã huỷ lần ' + hm(r.sec) + '. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');
+      refresh();
+    });
+  }
+  // cancelSlot huỷ trước một lần tự động chưa chốt: tới giờ chốt vẫn chốt và tính sổ, nhưng không gửi thiết bị.
+  function cancelSlot(date, r) {
+    if (!confirm('Huỷ lần tưới tự động ' + hm(r.sec) + ' ' + relDay(date).toLowerCase() + '? Tới giờ chốt lần này vẫn được chốt và sổ phút miễn vẫn tính như đã tưới, nhưng thiết bị sẽ không tưới.')) return;
+    send('POST', '/api/day/cancel-slot', { date: date, start_s: r.sec }).then(function (res) {
       if (!res.ok) return;
       savedAt = nowMs();
       toast('Đã huỷ lần ' + hm(r.sec) + '. Thiết bị nhận lịch mới ở heartbeat kế tiếp (tối đa 5 phút).');

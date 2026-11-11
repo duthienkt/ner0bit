@@ -85,8 +85,9 @@ func parseLineEntries(line string) []entry {
 
 // lineBase là số mốc tối đa của dòng 2 ngày date, chưa kể phiên manual, ở trường hợp xấu nhất
 // giữa tự động tắt (các mốc daily) và tự động bật (phiên auto đã chốt có run > 0 + các lần trong
-// p.Slots chưa có phiên auto). ss là các phiên của ngày; skipped là các giờ sắp ghi "bỏ" (không
-// tính). Ngày chưa có phiên auto nào thì bằng max(mốc daily, số lần tự động).
+// p.Slots chưa có phiên auto — lần user huỷ trước giờ chốt đã có phiên "đã huỷ" nên không tính).
+// ss là các phiên của ngày; skipped là các giờ sắp ghi "bỏ" (không tính). Ngày chưa có phiên
+// auto nào thì bằng max(mốc daily, số lần tự động).
 func lineBase(daily string, p Params, ss []Session, skipped map[int]bool) int {
 	decided := map[int]bool{}
 	n := 0
@@ -290,7 +291,28 @@ func (srv *Server) deviceBody(now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return bodyOf(daily, p.AutoEnabled, ss, prov), nil
+	body, warns := bodyOf(daily, p.AutoEnabled, ss, prov)
+	for _, w := range warns {
+		srv.warnCapped(now, w)
+	}
+	return body, nil
+}
+
+// warnCapped log mỗi lần dòng lịch bị cắt và ghi cảnh báo, tối đa một lần mỗi giờ. Ghi cảnh
+// báo lỗi chỉ log (không làm heartbeat lỗi); lần sau trong giờ thử ghi lại.
+func (srv *Server) warnCapped(now time.Time, msg string) {
+	log.Printf("CẢNH BÁO: %s", msg)
+	hour := now.In(vietnam).Format("2006-01-02 15")
+	srv.capMu.Lock()
+	defer srv.capMu.Unlock()
+	if srv.capWarnedHour == hour {
+		return
+	}
+	if err := srv.Store.AddWarning(now, "lịch", msg); err != nil {
+		log.Printf("lỗi ghi cảnh báo: %v", err)
+		return
+	}
+	srv.capWarnedHour = hour
 }
 
 // daySessions đọc các phiên của ngày date; khi bật tự động kèm bản tạm của các lần chưa chốt
@@ -326,13 +348,37 @@ func lineEntries(daily string, auto bool, ss []Session, prov []Decision) (es []e
 	return es, hasManual
 }
 
-// bodyOf ghép body gửi ESP từ lịch dự phòng và các phiên của hôm nay.
-func bodyOf(daily string, auto bool, ss []Session, prov []Decision) string {
+// bodyOf ghép body gửi ESP từ lịch dự phòng và các phiên của hôm nay. Dòng nào quá
+// maxEntriesPerLine mốc (chỉ còn qua đường cũ: nhập dữ liệu, sửa tay DB, đua đọc/ghi — các route
+// đều chặn) thì chỉ giữ các mốc sớm nhất, kèm cảnh báo trong warns.
+func bodyOf(daily string, auto bool, ss []Session, prov []Decision) (body string, warns []string) {
+	line1 := daily
+	if d := parseLineEntries(daily); len(d) > maxEntriesPerLine {
+		line1 = renderLine(capEntries(d))
+		warns = append(warns, fmt.Sprintf("Lịch dự phòng có %d mốc, vượt %d: chỉ gửi %d mốc sớm nhất.",
+			len(d), maxEntriesPerLine, maxEntriesPerLine))
+	}
 	es, hasManual := lineEntries(daily, auto, ss, prov)
 	if !auto && !hasManual {
-		return daily
+		return line1, warns
 	}
-	return daily + "\n" + renderLine(es)
+	if len(es) > maxEntriesPerLine {
+		kept := capEntries(es)
+		warns = append(warns, fmt.Sprintf("Lịch hôm nay có %d mốc, vượt %d: chỉ gửi %d mốc sớm nhất, bỏ các mốc sau %s.",
+			len(es), maxEntriesPerLine, maxEntriesPerLine, hms(kept[len(kept)-1].StartS)))
+		es = kept
+	}
+	return line1 + "\n" + renderLine(es), warns
+}
+
+// capEntries trả maxEntriesPerLine mốc sớm nhất của es (theo giờ; firmware chỉ nhận 20 mốc đầu).
+func capEntries(es []entry) []entry {
+	sorted := append([]entry(nil), es...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].StartS < sorted[j].StartS })
+	if len(sorted) > maxEntriesPerLine {
+		sorted = sorted[:maxEntriesPerLine]
+	}
+	return sorted
 }
 
 // ---- HTTP ----

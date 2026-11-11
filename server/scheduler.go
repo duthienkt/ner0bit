@@ -84,7 +84,7 @@ func (sc *Scheduler) Tick(ctx context.Context) error {
 		return errors.Join(append(errs, err)...)
 	}
 	if p.AutoEnabled {
-		errs = append(errs, sc.decideDue(now, p, today))
+		errs = append(errs, sc.decideDue(ctx, now, p, today))
 	}
 	errs = append(errs, sc.closeDays(now, p, ""))
 	return errors.Join(errs...)
@@ -134,8 +134,9 @@ func (sc *Scheduler) haveFreshRain(now time.Time) (bool, error) {
 }
 
 // collect lấy Vrain ở phút 9–11 khi còn thiếu snapshot giờ hiện tại (tới :11 vẫn thiếu ⇒ giữ
-// snapshot cũ, cảnh báo "Vrain trễ"), METAR mỗi giờ từ phút 9. Lỗi mạng/dữ liệu hỏng chỉ cảnh
-// báo, không ghi gì; chỉ trả lỗi DB. Cảnh báo lỗi Vrain và Vrain trễ chung hạn mức một lần mỗi giờ.
+// snapshot cũ, cảnh báo "Vrain trễ"; ngoài các phút này decideDue tự lấy khi cần chốt), METAR mỗi
+// giờ từ phút 9. Lỗi mạng/dữ liệu hỏng chỉ cảnh báo, không ghi gì; chỉ trả lỗi DB. Cảnh báo lỗi
+// Vrain và Vrain trễ chung hạn mức một lần mỗi giờ.
 func (sc *Scheduler) collect(ctx context.Context, now time.Time) error {
 	m := now.Minute()
 	var errs []error
@@ -235,13 +236,15 @@ func (sc *Scheduler) closeDays(now time.Time, p Params, before string) error {
 }
 
 // decideDue chốt các lần tưới của hôm nay đã tới giờ chốt mà chưa chốt (kể cả chốt bù khi
-// server vừa khởi động). Phút :09–:10 mà chưa có snapshot Vrain của giờ này thì chờ tick sau;
-// từ :11 chốt bằng snapshot cũ và cảnh báo "Vrain trễ".
-func (sc *Scheduler) decideDue(now time.Time, p Params, today string) error {
+// server vừa khởi động). Phút :09–:10 mà chưa có snapshot Vrain của giờ này thì chờ tick sau.
+// Ngoài phút :09–:11 (chốt bù, hoặc slot không rơi vào :15) mà chưa có thì lấy Vrain một lần
+// trước khi chốt. Vẫn chưa có ⇒ chốt bằng snapshot cũ và cảnh báo "Vrain trễ".
+func (sc *Scheduler) decideDue(ctx context.Context, now time.Time, p Params, today string) error {
 	decided, err := sc.Store.Decided(today)
 	if err != nil {
 		return err
 	}
+	fetched := false
 	for _, slot := range sortedSlots(p.Slots) {
 		if decided[slot.StartS] {
 			continue
@@ -253,14 +256,8 @@ func (sc *Scheduler) decideDue(now time.Time, p Params, today string) error {
 		if now.Before(at) {
 			break // các slot sau còn muộn hơn
 		}
-		// Slot của ngày D luôn thuộc ngày Vrain D (slot trong 04:15–18:45).
-		l, _, err := sc.Store.Ledger(today)
-		if err != nil {
-			return err
-		}
 		if at.Before(p.AutoEnabledAt) {
-			d := Decision{Slot: slot, Reason: reasonLateEnable}
-			if err := sc.Store.SaveDecision(today, d, l, stateSkipped, now); err != nil {
+			if err := sc.Store.SaveSkip(today, slot, reasonLateEnable, now); err != nil {
 				return err
 			}
 			log.Printf("Lịch tự động: bỏ lần %s ngày %s (%s)", hms(slot.StartS), today, reasonLateEnable)
@@ -270,6 +267,15 @@ func (sc *Scheduler) decideDue(now time.Time, p Params, today string) error {
 		have, err := sc.haveFreshRain(now)
 		if err != nil {
 			return err
+		}
+		if m := now.Minute(); !have && !fetched && sc.Rain != nil && (m < collectMinute || m > vrainLastMinute) {
+			fetched = true // collect chỉ lấy Vrain ở phút :09–:11
+			if err := sc.fetchRain(ctx, now); err != nil {
+				return err
+			}
+			if have, err = sc.haveFreshRain(now); err != nil {
+				return err
+			}
 		}
 		if !have {
 			if m := now.Minute(); m >= collectMinute && m < vrainLastMinute {
@@ -281,6 +287,11 @@ func (sc *Scheduler) decideDue(now time.Time, p Params, today string) error {
 			if err := sc.warnOnce(now, "vrain", msg); err != nil {
 				return err
 			}
+		}
+		// Slot của ngày D luôn thuộc ngày Vrain D (slot trong 04:15–18:45).
+		l, _, err := sc.Store.Ledger(today)
+		if err != nil {
+			return err
 		}
 		sum := 0.0
 		if r, ok, err := sc.Store.LatestRain(today, now); err != nil {
