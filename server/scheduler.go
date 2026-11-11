@@ -19,7 +19,7 @@ const (
 const (
 	collectMinute    = 9  // Vrain cập nhật phút :07 ⇒ thu thập từ :09
 	vrainLastMinute  = 11 // thử lại Vrain tới :11 rồi thôi
-	reasonLateEnable = "bật tự động sau giờ chốt"
+	reasonLateEnable = "bật tưới theo thời tiết sau giờ chốt"
 	closeAfter       = 20*time.Hour + 12*time.Minute // không có bản 20:07 ⇒ đóng ngày lúc 20:12
 )
 

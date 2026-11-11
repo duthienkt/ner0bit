@@ -906,7 +906,7 @@ func TestCancelSlotRejects(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"đã qua giờ tưới", `{"date":"2026-11-12","start_s":18900}`, "đã qua giờ tưới"},
 		{"ngày đã qua", `{"date":"2026-11-11","start_s":62100}`, "đã qua giờ tưới"},
-		{"không phải lần tự động", `{"date":"2026-11-12","start_s":40000}`, "Không có lần tự động"},
+		{"không phải lần tự động", `{"date":"2026-11-12","start_s":40000}`, "Không có lần tưới theo thời tiết"},
 		{"ngày hỏng", `{"date":"12/11/2026","start_s":62100}`, "YYYY-MM-DD"},
 		{"trường lạ", `{"date":"2026-11-12","start_s":62100,"x":1}`, "JSON sai"},
 	}
