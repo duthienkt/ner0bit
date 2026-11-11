@@ -411,16 +411,18 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		resp.ScheduleError = err.Error()
 	} else {
 		resp.Schedule = sched
-		if body, err := s.deviceBody(now); err != nil {
-			resp.ScheduleError = err.Error()
-		} else {
-			resp.TodayBody = &body
-		}
 	}
+	// today_body lấy từ cùng lần đọc với "day" để hai phần không lệch nhau.
 	if day, err := s.dayView(resp.Today, now); err != nil {
 		log.Printf("UI: lỗi đọc lịch hôm nay: %v", err)
+		if resp.ScheduleError == "" {
+			resp.ScheduleError = "Không đọc được lịch hôm nay."
+		}
 	} else {
 		resp.Day = day
+		if resp.Schedule != nil {
+			resp.TodayBody = day.DeviceBody
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

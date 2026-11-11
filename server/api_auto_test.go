@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 func apiDo(t *testing.T, s *Server, c *http.Cookie, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	opts := []reqOpt{withCookie(c)}
+	if body == "" && method == http.MethodPost {
+		body = "{}" // như UI: POST không dữ liệu vẫn gửi JSON
+	}
 	if body != "" {
 		opts = append(opts, withHeader("Content-Type", "application/json"))
 	}
@@ -305,7 +309,7 @@ func TestCancelAutoSession(t *testing.T) {
 	c := mustLogin(t, s)
 	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
 	decide05(t, s)
-	*now = vt("2026-11-12", "05:30")
+	*now = vt("2026-11-12", "05:12") // đã chốt 05:15, chưa tới giờ tưới
 	before, _, _ := s.Store.Ledger("2026-11-12")
 
 	auto := autoSessions(t, s.Store, "2026-11-12")
@@ -545,5 +549,159 @@ func TestWeatherHoursClamp(t *testing.T) {
 	if len(w2.Rain) != 3 || w2.Rain[0].HourMM != nil || w2.Rain[1].HourMM != nil ||
 		w2.Rain[2].HourMM == nil || *w2.Rain[2].HourMM != 0.5 {
 		t.Errorf("không có điểm trước / mất bản giữa chừng: %s", rec.Body.String())
+	}
+}
+
+// ---- vòng sửa 1 ----
+
+func TestCancelAfterStartRejected(t *testing.T) {
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	decide05(t, s)
+	id := autoSessions(t, s.Store, "2026-11-12")[0].ID
+	for _, hm := range []string{"05:15", "05:30"} {
+		*now = vt("2026-11-12", hm)
+		rec := apiDo(t, s, c, http.MethodPost, fmt.Sprintf("/api/sessions/%d/cancel", id), "")
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "đã qua giờ tưới") {
+			t.Errorf("%s: code %d body %s, muốn 400 \"đã qua giờ tưới\"", hm, rec.Code, rec.Body.String())
+		}
+	}
+	if got := autoSessions(t, s.Store, "2026-11-12"); got[0].State != stateFinal {
+		t.Errorf("phiên bị đổi: %+v", got[0])
+	}
+}
+
+func TestStateChangingRoutesNeedJSON(t *testing.T) {
+	s, _, now := newUIServer(t, "25200:900,61200")
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	decide05(t, s)
+	*now = vt("2026-11-12", "05:12")
+	id := autoSessions(t, s.Store, "2026-11-12")[0].ID
+	routes := []struct{ method, path, body string }{
+		{http.MethodPost, fmt.Sprintf("/api/sessions/%d/cancel", id), ""},
+		{http.MethodPost, "/api/settings/daily-from-slots", ""},
+		{http.MethodPut, "/api/settings", "auto_enabled=false"},
+		{http.MethodPut, "/api/schedule", "daily=25200"},
+		{http.MethodPost, "/api/sessions", "date=2026-11-12&start_s=40000&run_s=60"},
+	}
+	for _, r := range routes {
+		rec := do(s, r.method, r.path, r.body, withCookie(c), withHeader("Content-Type", "application/x-www-form-urlencoded"))
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("%s %s dạng form: code %d, muốn 415", r.method, r.path, rec.Code)
+		}
+	}
+	if got := autoSessions(t, s.Store, "2026-11-12"); got[0].State != stateFinal {
+		t.Errorf("phiên auto bị huỷ: %+v", got[0])
+	}
+	if d, _ := s.Store.Daily(); d != "25200:900,61200" {
+		t.Errorf("daily bị đổi: %q", d)
+	}
+	if p, _ := s.Store.Params(); !p.AutoEnabled {
+		t.Error("tham số bị đổi")
+	}
+	if ss, _ := s.Store.Sessions("2026-11-12"); len(ss) != 1 {
+		t.Errorf("thêm phiên dạng form: %+v", ss)
+	}
+}
+
+func TestSettingsSlotBoundariesAccepted(t *testing.T) {
+	s, _, _ := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	p := DefaultParams()
+	p.Slots = []Slot{{slotMinS, "am"}, {slotMinS + 900 + 180, "am"}, {slotMaxS, "pm"}} // 04:15, cách đúng block+3 phút, 18:45
+	if rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p)); rec.Code != http.StatusOK {
+		t.Errorf("biên hợp lệ: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// moveSlot đổi 05:15 → 05:20 lúc 05:30 (đang bật tự động).
+func moveSlot(t *testing.T, s *Server, c *http.Cookie) {
+	t.Helper()
+	p := DefaultParams()
+	p.AutoEnabled = true
+	p.Slots = []Slot{{19200, "am"}, {22500, "am"}, {62100, "pm"}}
+	if rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSlotMovedAfterDecideTimeSkipped(t *testing.T) {
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	decide05(t, s)
+	before, _, _ := s.Store.Ledger("2026-11-12")
+	*now = vt("2026-11-12", "05:30")
+	moveSlot(t, s, c)
+	sc := &Scheduler{Store: s.Store, Now: func() time.Time { return *now }}
+	if err := sc.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := autoSessions(t, s.Store, "2026-11-12")
+	if len(got) != 2 || got[0].StartS != 18900 || got[0].RunS != 360 || got[0].State != stateFinal ||
+		got[1].StartS != 19200 || got[1].RunS != 0 || got[1].State != stateSkipped || got[1].Reason != reasonSlotChanged {
+		t.Fatalf("phiên auto: %+v", got)
+	}
+	if after, _, _ := s.Store.Ledger("2026-11-12"); after != before {
+		t.Errorf("sổ bị đổi: %+v → %+v", before, after)
+	}
+	if body, _ := s.deviceBody(*now); body != threeSlots+"\n18900:360,22500:900,62100:900" {
+		t.Errorf("body %q", body)
+	}
+}
+
+func TestSlotMovedHeavyRainStillNoWater(t *testing.T) {
+	// Mưa 12 mm (≥ rain_hi) cả ngày: đổi 05:15 → 05:20 sau khi chốt không được làm 17:15 tưới.
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	rain := &fakeRain{now: now, snaps: hourlySnaps(vt("2026-11-11", "20:07"), vt("2026-11-12", "19:07"),
+		func(time.Time) float64 { return 12 })}
+	sc := &Scheduler{Store: s.Store, Rain: rain, Metar: &fakeMetar{now: now, obs: sunnyObs("2026-11-12")},
+		Now: func() time.Time { return *now }}
+	runTicks(t, sc, now, vt("2026-11-12", "05:00"), vt("2026-11-12", "05:29"))
+	*now = vt("2026-11-12", "05:30")
+	moveSlot(t, s, c)
+	runTicks(t, sc, now, vt("2026-11-12", "05:30"), vt("2026-11-12", "17:20"))
+	for _, x := range autoSessions(t, s.Store, "2026-11-12") {
+		if x.RunS != 0 {
+			t.Errorf("lần %s tưới %d giây dù mưa 12 mm: %s", hms(x.StartS), x.RunS, x.Reason)
+		}
+	}
+	if l, _, _ := s.Store.Ledger("2026-11-12"); l.UsedRainS != 2700 {
+		t.Errorf("used_rain %v, muốn 2700 (đúng quota)", l.UsedRainS)
+	}
+}
+
+func TestSettingsOverflowCountsTodayLine(t *testing.T) {
+	// Hôm nay đã chốt 05:15; thêm 17 phiên bơm thử (3 + 17 = 20). Đổi 05:15 → 05:40 lúc 05:12
+	// ⇒ dòng 2 = 05:15 đã chốt + 05:40 + 06:15 + 17:15 + 17 = 21 mốc ⇒ phải từ chối.
+	s, _, now := newUIServer(t, threeSlots)
+	c := mustLogin(t, s)
+	autoParams(t, s.Store, vt("2026-11-01", "00:00"))
+	decide05(t, s)
+	*now = vt("2026-11-12", "05:12")
+	for i := 0; i < 17; i++ {
+		if _, err := s.Store.AddManualSession(testToday, 30000+i*600, 60, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := DefaultParams()
+	p.AutoEnabled = true
+	p.Slots = []Slot{{20400, "am"}, {22500, "am"}, {62100, "pm"}}
+	rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), testToday) {
+		t.Errorf("code %d body %s, muốn 400 nêu %s", rec.Code, rec.Body.String(), testToday)
+	}
+	// Không đổi 05:15 thì vẫn 20 mốc: được.
+	p.Slots[0] = Slot{18900, "am"}
+	if rec := apiDo(t, s, c, http.MethodPut, "/api/settings", paramsJSON(t, p)); rec.Code != http.StatusOK {
+		t.Errorf("giữ slot: %d %s", rec.Code, rec.Body.String())
+	}
+	// Phiên bơm thử thứ 18 hôm nay vượt 20.
+	if _, err := s.Store.AddManualSession(testToday, 50000, 60, ""); err == nil {
+		t.Error("phiên thứ 18 phải bị từ chối")
 	}
 }

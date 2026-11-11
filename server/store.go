@@ -168,11 +168,16 @@ func (s *Store) SetParams(p Params) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
+	return setParamsQ(s.db, p)
+}
+
+// setParamsQ ghi tham số (không kiểm tra) qua x — DB hoặc transaction.
+func setParamsQ(x execer, p Params) error {
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO settings(key, value_json) VALUES(?, ?)
+	_, err = x.Exec(`INSERT INTO settings(key, value_json) VALUES(?, ?)
 		ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json`, settingsParamsKey, string(raw))
 	if err != nil {
 		return fmt.Errorf("ghi tham số: %w", err)

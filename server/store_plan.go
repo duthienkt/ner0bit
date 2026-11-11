@@ -35,16 +35,27 @@ func ledgerQ(q querier, vday string) (Ledger, bool, error) {
 // l.VDay. state là stateFinal khi RunS > 0, ngược lại stateSkipped. Slot đã chốt ⇒ lỗi (PK
 // của blocks), nhờ vậy sổ không bao giờ bị trừ hai lần.
 func (s *Store) SaveDecision(date string, d Decision, l Ledger, state string, decidedAt time.Time) error {
-	inputs, err := json.Marshal(d)
-	if err != nil {
-		return fmt.Errorf("chốt lần tưới: %w", err)
-	}
-	at := decidedAt.In(vietnam).Format(time.RFC3339)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("chốt lần tưới: %w", err)
 	}
 	defer tx.Rollback()
+	if err := saveDecisionTx(tx, date, d, l, state, decidedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("chốt lần tưới: %w", err)
+	}
+	return nil
+}
+
+// saveDecisionTx là phần ghi của SaveDecision trong transaction tx có sẵn.
+func saveDecisionTx(tx *sql.Tx, date string, d Decision, l Ledger, state string, decidedAt time.Time) error {
+	inputs, err := json.Marshal(d)
+	if err != nil {
+		return fmt.Errorf("chốt lần tưới: %w", err)
+	}
+	at := decidedAt.In(vietnam).Format(time.RFC3339)
 	if _, err := tx.Exec(`INSERT INTO blocks(vday, slot_s, phase, run_s, state, decided_at, inputs_json, reason)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 		l.VDay, d.Slot.StartS, d.Slot.Phase, d.RunS, state, at, string(inputs), d.Reason); err != nil {
@@ -71,8 +82,37 @@ func (s *Store) SaveDecision(date string, d Decision, l Ledger, state string, de
 			return fmt.Errorf("ghi hệ số nắng ngày %s: %w", l.VDay, err)
 		}
 	}
+	return nil
+}
+
+// SetParamsSkipping lưu tham số và, trong cùng transaction, ghi "bỏ" (run 0, lý do reason, sổ
+// giữ nguyên) cho các lần skips của ngày date — các lần mới thêm khi giờ chốt đã qua. Nhờ vậy
+// scheduler không bao giờ thấy tham số mới mà chưa thấy các lần "bỏ" đó (không chốt bù chúng).
+func (s *Store) SetParamsSkipping(p Params, date string, skips []Slot, reason string, at time.Time) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ghi tham số: %w", err)
+	}
+	defer tx.Rollback()
+	if len(skips) > 0 {
+		l, _, err := ledgerQ(tx, date)
+		if err != nil {
+			return err
+		}
+		for _, sl := range skips {
+			if err := saveDecisionTx(tx, date, Decision{Slot: sl, Reason: reason}, l, stateSkipped, at); err != nil {
+				return err
+			}
+		}
+	}
+	if err := setParamsQ(tx, p); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("chốt lần tưới: %w", err)
+		return fmt.Errorf("ghi tham số: %w", err)
 	}
 	return nil
 }

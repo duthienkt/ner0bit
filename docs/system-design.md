@@ -348,7 +348,7 @@ run         = block − phần đã dùng, làm tròn phút;  run < min_run ⇒ 
 - **Cuối ngày Vrain**: `carry_in` của ngày sau = min(`carry_max`, M(bản cuối của ngày) − `used_rain`). Dành cho mưa sau lần tưới chiều mà trước 19h.
 - **Bản tạm**: các lần chưa chốt được tính lại mỗi khi thiết bị hỏi, cùng công thức, giả định không mưa thêm và S = 1. Lý do: dòng 2 thay hoàn toàn dòng 1 — nếu dòng 2 chỉ có các lần đã chốt mà server chết, thiết bị sẽ mất các lần còn lại trong ngày.
 - Mỗi lần chốt lưu kèm đầu vào (mưa, M, các phần `avail`, S, ET, cảnh báo) và một dòng lý do, ví dụ "mưa 6.2 mm từ 19h ⇒ miễn 11 phút; tưới 4 phút".
-- Bật tự động giữa ngày: các lần đã qua giờ chốt của hôm nay được ghi "bỏ" (lý do "bật tự động sau giờ chốt"), các lần sau tính bình thường. Đổi tham số giữa ngày: lần đã chốt giữ nguyên, lần chưa chốt dùng tham số mới.
+- Bật tự động giữa ngày: các lần đã qua giờ chốt của hôm nay được ghi "bỏ" (lý do "bật tự động sau giờ chốt"), các lần sau tính bình thường. Đổi tham số giữa ngày: lần đã chốt giữ nguyên, lần chưa chốt dùng tham số mới. Lần **mới** (giờ chưa có trong danh sách cũ) mà giờ chốt hôm nay đã qua lúc lưu ⇒ hôm nay ghi "bỏ" (lý do "đổi lịch sau giờ chốt"), không chốt bù, sổ giữ nguyên — tránh tưới thêm một block hay dùng phút miễn lần nữa (ví dụ dời 05:15 → 05:20 lúc 05:30 sau khi đã chốt 05:15).
 
 ### Lịch dự phòng và lịch tưới theo ngày
 
@@ -358,11 +358,11 @@ Lịch kiểu "event calendar":
 - **Lịch tưới** của mỗi ngày là danh sách **phiên** `{giờ, thời lượng, nguồn, trạng thái}`:
   - Nguồn `auto`: planner thêm phiên lúc chốt. `run = 0` vẫn lưu với trạng thái "bỏ" kèm lý do, nhưng không gửi thiết bị.
   - Nguồn `manual` (bơm thử): người dùng thêm cho hôm nay hoặc ngày tới (giờ, thời lượng ≤ 30 phút, ghi chú) và xoá được. Chỉ cộng thêm, không đụng phiên khác, không đụng sổ phút miễn. Phiên sát phiên khác (< `block` + 3 phút) chỉ cảnh báo, vẫn lưu — firmware sẽ bỏ lần sau với lý do `busy`/`rest`.
-  - Người dùng **huỷ** được phiên `auto` đã chốt của hôm nay hoặc ngày tới (ví dụ biết trước sẽ mưa): phiên giữ lại với trạng thái "đã huỷ", sổ phút miễn tính như đã tưới.
+  - Người dùng **huỷ** được phiên `auto` đã chốt mà **chưa tới giờ tưới** (ví dụ biết trước sẽ mưa): phiên giữ lại với trạng thái "đã huỷ", sổ phút miễn tính như đã tưới. Phiên đã bắt đầu thì không huỷ (thiết bị luôn chạy nốt phiên đang chạy).
 - **Body trả thiết bị**:
   - Tự động **bật**: dòng 1 = `daily`; dòng 2 = phiên `auto` đã chốt có `run > 0` và không bị huỷ ∪ phiên `manual` ∪ bản tạm có `run > 0` của các lần chưa chốt, sắp theo giờ. Rỗng ⇒ dòng 2 rỗng (hôm nay không tưới). Giữ cả phiên đã qua giờ: thiết bị bỏ qua khung đã qua, không tưới bù.
   - Tự động **tắt**: chỉ dòng 1; có phiên bơm thử hôm nay thì thêm dòng 2 = `daily` ∪ phiên `manual`.
-  - Mỗi dòng ≤ 20 mốc: thêm phiên bơm thử, đổi `daily` hay đổi số lần tự động đều bị từ chối nếu làm một ngày từ hôm nay vượt max(mốc `daily`, số lần tự động) + phiên bơm thử > 20.
+  - Mỗi dòng ≤ 20 mốc: thêm phiên bơm thử, đổi `daily` hay đổi các lần tự động đều bị từ chối nếu làm một ngày từ hôm nay vượt max(mốc `daily`, phiên `auto` đã chốt có `run > 0` + các lần tự động chưa chốt) + phiên bơm thử > 20. Ngày chưa có phiên `auto` nào thì là max(mốc `daily`, số lần tự động).
   - Lỗi DB ⇒ 503: thiết bị giữ lịch cache và events, gửi lại lần sau.
 - Lịch các ngày đã qua giữ lại làm lịch sử, xem lại được trên giao diện.
 
@@ -370,7 +370,7 @@ Lịch kiểu "event calendar":
 
 Giao diện (`server/ui/index.html`) có các mục: trạng thái thiết bị; **Hôm nay** (mỗi lần tưới một hàng: giờ, phút, nguồn, trạng thái, lý do; bản tạm in nghiêng; nút "Huỷ" cho phiên tự động; mưa và nhiệt độ 48 giờ; tưới thử); **Lịch tưới** (chọn ngày, thêm/xoá phiên bơm thử, cảnh báo); **Thiết lập tự động** (bật/tắt và các tham số trên); **Lịch dự phòng**; hoạt động gần đây.
 
-API JSON (đăng nhập bằng cookie; ghi phải gửi `Content-Type: application/json`):
+API JSON (đăng nhập bằng cookie; mọi request ghi trừ `DELETE` phải gửi `Content-Type: application/json`, kể cả POST không có dữ liệu — chống CSRF cùng cookie `SameSite=Strict`):
 
 | Endpoint | |
 |---|---|
@@ -378,7 +378,7 @@ API JSON (đăng nhập bằng cookie; ghi phải gửi `Content-Type: applicati
 | `GET\|PUT /api/schedule` | Lịch dự phòng `{"daily": "..."}` |
 | `GET /api/day?date=YYYY-MM-DD` | Lịch tưới của ngày: `sessions`, `provisional` (bản tạm), `ledger` (sổ), `sum_mm` (mưa cộng dồn mới nhất), `warnings`, `device_body` (chỉ hôm nay) |
 | `POST /api/sessions`, `DELETE /api/sessions/{id}` | Thêm / xoá phiên bơm thử |
-| `POST /api/sessions/{id}/cancel` | Huỷ phiên tự động đã chốt (hôm nay hoặc ngày tới) |
+| `POST /api/sessions/{id}/cancel` | Huỷ phiên tự động đã chốt, chưa tới giờ tưới |
 | `GET /api/weather?hours=48` | Bản Vrain (kèm mưa từng giờ) và METAR, tối đa 168 giờ |
 | `GET\|PUT /api/settings` | Tham số tự động + quota, per_mm, lịch dự phòng có khớp các lần tự động không. Server tự đặt thời điểm bật (`auto_enabled_at`) |
 | `POST /api/settings/daily-from-slots` | Đặt lịch dự phòng = các lần tự động, mỗi lần đủ `block` |

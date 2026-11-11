@@ -715,6 +715,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   // send gửi JSON (hoặc không body) rồi trả {ok, data}; lỗi mạng ⇒ toast.
   function send(method, url, body) {
     var opts = { method: method };
+    if (body === undefined && method !== 'DELETE') body = {}; // route ghi chỉ nhận JSON (chống CSRF)
     if (body !== undefined) {
       opts.headers = { 'Content-Type': 'application/json' };
       opts.body = JSON.stringify(body);
@@ -834,7 +835,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       var st = s.state;
       if (s.source === 'manual') st = 'planned';
       else if (!auto && st === 'final' && day.date >= today) st = 'unsent';
-      rows.push({ sec: s.start_s, run: s.run_s, kind: s.source, state: st, raw: s.state, id: s.id,
+      rows.push({ sec: s.start_s, run: s.run_s, kind: s.source, state: st, id: s.id,
         text: s.source === 'manual' ? s.note : s.reason });
     });
     day.provisional.forEach(function (d) {
@@ -855,7 +856,8 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
 
   function renderSessions(box, day, editable) {
     box.textContent = '';
-    var rows = dayRows(day);
+    var rows = dayRows(day), today = todayStr(), nowSec = vn(nowMs()).sec;
+    function started(r) { return day.date < today || (day.date === today && r.sec <= nowSec); }
     if (!rows.length) {
       box.appendChild(h('p', { class: 'empty', text: 'Không có lần tưới nào.' }));
       return;
@@ -863,7 +865,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     rows.forEach(function (r) {
       var off = r.state === 'skipped' || r.state === 'cancelled' || r.state === 'unsent' || r.run === 0;
       var act = null;
-      if (editable && r.kind === 'auto' && r.raw === 'final') {
+      if (editable && r.kind === 'auto' && r.state === 'final' && !started(r)) {
         act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { cancelSession(r); } }, 'Huỷ');
       } else if (editable && r.kind === 'manual') {
         act = h('button', { type: 'button', class: 'btn-quiet btn-danger', onclick: function () { deleteSession(r); } }, 'Xoá');
@@ -1109,6 +1111,15 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     };
   }
   function formDirty() { return form !== null && JSON.stringify(paramsOf(form)) !== formSaved; }
+  // formError: lỗi nhập trên form (ô số trống/sai, giờ trống); server vẫn kiểm tra miền giá trị.
+  function formError(f) {
+    var labels = { block: 'Block mỗi lần', min_run: 'Bỏ lần dưới', rain_lo: 'Mưa không tính dưới',
+      rain_hi: 'Mưa đủ, khỏi tưới từ', carry_max: 'Phút dư chuyển sáng hôm sau', e_ref: 'Bốc hơi ngày nắng chuẩn' };
+    if (!f.slots.length) return 'Cần ít nhất 1 lần tưới.';
+    if (f.slots.some(function (s) { return !isFinite(s.sec); })) return 'Có lần tưới chưa nhập giờ.';
+    for (var k in labels) if (!isFinite(f[k]) || f[k] < 0) return labels[k] + ': chưa nhập số hợp lệ.';
+    return '';
+  }
 
   function numField(label, key, step, unit) {
     var inp = h('input', { type: 'number', step: step, min: '0', inputmode: 'decimal', id: 'set-' + key });
@@ -1128,7 +1139,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var since = p.auto_enabled && p.auto_enabled_at ? 'Đang bật từ ' + stamp(Date.parse(p.auto_enabled_at)) + '.' :
       'Đang tắt: thiết bị tưới theo lịch dự phòng.';
     box.appendChild(h('label', { class: 'switch', for: 'set-auto' }, chk, 'Bật lịch tưới tự động'));
-    box.appendChild(h('p', { class: 'day-sum', text: since + ' Bật giữa ngày thì các lần đã qua giờ chốt (6 phút trước giờ tưới) của hôm nay được bỏ qua.' }));
+    box.appendChild(h('p', { class: 'day-sum', text: since + ' Bật giữa ngày, hoặc thêm/đổi một lần tưới khi đã qua giờ chốt của nó (6 phút trước giờ tưới), thì hôm nay bỏ lần đó.' }));
 
     var slots = h('div', { class: 'entries' });
     function drawSlots() {
@@ -1187,16 +1198,19 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     d.appendChild(document.createTextNode(' (' + form.slots.length + ' lần × block). Mỗi mm mưa vượt ngưỡng thấp miễn '));
     d.appendChild(h('b', { text: span > 0 && isFinite(quota) ? (Math.round(quota / span * 10) / 10) + ' phút' : '—' }));
     d.appendChild(document.createTextNode('.'));
-    var dirty = formDirty();
-    $('set-save').disabled = !dirty;
+    var dirty = formDirty(), err = formError(form);
+    $('set-save').disabled = !dirty || !!err;
     $('set-revert').hidden = !dirty;
     var msg = $('set-msg');
-    msg.textContent = dirty ? 'Có thay đổi chưa lưu.' : '';
+    msg.textContent = err || (dirty ? 'Có thay đổi chưa lưu.' : '');
+    msg.className = err ? 'note bad' : '';
     var dfs = $('daily-from-slots');
     if (dfs) dfs.disabled = dirty;
   }
 
   function saveSettings() {
+    var err = formError(form);
+    if (err) { toast(err, true); return; }
     var wasOn = settings.params.auto_enabled;
     if (form.auto && !wasOn && !confirm('Bật lịch tưới tự động? Từ giờ server tự tính số phút mỗi lần theo mưa và nắng.')) return;
     $('set-save').disabled = true;

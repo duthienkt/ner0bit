@@ -28,6 +28,7 @@ const (
 	defaultWeatherHours = 48
 	maxWeatherHours     = 168
 	hourGapMax          = 90 * time.Minute // hai snapshot cách hơn ⇒ hiệu số không còn là mưa một giờ
+	reasonSlotChanged   = "đổi lịch sau giờ chốt"
 )
 
 // errNoSession: không có phiên với id đó (⇒ 404).
@@ -35,17 +36,21 @@ var errNoSession = errors.New("không có phiên này")
 
 // ---- Store ----
 
-// CancelAutoSession đặt state=cancelled cho phiên auto đã chốt của ngày ≥ today. Sổ phút miễn
-// và bảng blocks giữ nguyên (spec §4.5: huỷ vẫn tính như đã chốt). Không có phiên ⇒ errNoSession;
-// phiên manual, ngày đã qua, phiên không ở trạng thái chốt ⇒ *errSession.
-func (s *Store) CancelAutoSession(id int64, today string, at time.Time) error {
+// CancelAutoSession đặt state=cancelled cho phiên auto đã chốt chưa tới giờ tưới lúc at. Sổ phút
+// miễn và bảng blocks giữ nguyên (spec §4.5: huỷ vẫn tính như đã chốt). Không có phiên ⇒
+// errNoSession; phiên manual, đã qua giờ tưới, không ở trạng thái chốt ⇒ *errSession.
+func (s *Store) CancelAutoSession(id int64, at time.Time) error {
+	at = at.In(vietnam)
+	today := at.Format(time.DateOnly)
+	nowS := at.Hour()*3600 + at.Minute()*60 + at.Second()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("huỷ phiên: %w", err)
 	}
 	defer tx.Rollback()
 	var date, source, state string
-	err = tx.QueryRow(`SELECT date, source, state FROM sessions WHERE id = ?`, id).Scan(&date, &source, &state)
+	var startS int
+	err = tx.QueryRow(`SELECT date, start_s, source, state FROM sessions WHERE id = ?`, id).Scan(&date, &startS, &source, &state)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return errNoSession
@@ -53,8 +58,8 @@ func (s *Store) CancelAutoSession(id int64, today string, at time.Time) error {
 		return fmt.Errorf("huỷ phiên: %w", err)
 	case source != sessionAuto:
 		return &errSession{"Chỉ huỷ được phiên tự động; phiên bơm thử thì xoá."}
-	case date < today:
-		return &errSession{"Không huỷ được phiên của ngày đã qua."}
+	case date < today || (date == today && startS <= nowS):
+		return &errSession{"Phiên đã qua giờ tưới (thiết bị chạy nốt phiên đang chạy), không huỷ được."}
 	case state != stateFinal:
 		return &errSession{fmt.Sprintf("Phiên đang ở trạng thái %q; chỉ huỷ được phiên đã chốt.", state)}
 	}
@@ -211,13 +216,15 @@ func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
 // ---- Huỷ phiên auto ----
 
 func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) { // chống CSRF như các route ghi khác; body bỏ qua
+		return
+	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
 		writeJSONError(w, http.StatusBadRequest, "id phiên không hợp lệ.")
 		return
 	}
-	now := s.now().In(vietnam)
-	err = s.Store.CancelAutoSession(id, now.Format(time.DateOnly), now)
+	err = s.Store.CancelAutoSession(id, s.now())
 	var se *errSession
 	switch {
 	case errors.Is(err, errNoSession):
@@ -396,9 +403,15 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Tham số không hợp lệ: "+err.Error()+".")
 		return
 	}
-	// Dòng 2 có tối đa max(mốc daily, số lần tự động) + phiên bơm thử: không để ngày nào từ hôm
-	// nay vượt giới hạn mốc của firmware.
-	if msg, err := s.overflowWith(len(next.Slots), now); err != nil {
+	today := now.Format(time.DateOnly)
+	skips, err := s.lateNewSlots(cur, next, today, now)
+	if err != nil {
+		log.Printf("UI: lỗi đọc phiên: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "Không đọc được phiên.")
+		return
+	}
+	// Không để dòng 2 của ngày nào từ hôm nay vượt giới hạn mốc của firmware.
+	if msg, err := s.overflowWith(next, today, skips); err != nil {
 		log.Printf("UI: lỗi đọc phiên: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Không đọc được phiên.")
 		return
@@ -406,10 +419,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, msg)
 		return
 	}
-	if err := s.Store.SetParams(next); err != nil {
+	if err := s.Store.SetParamsSkipping(next, today, skips, reasonSlotChanged, now); err != nil {
 		log.Printf("UI: lỗi ghi tham số: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Không ghi được tham số.")
 		return
+	}
+	for _, sl := range skips {
+		log.Printf("UI: %s thêm lần %s khi đã qua giờ chốt ⇒ hôm nay bỏ lần này (%s)", s.clientIP(r), hms(sl.StartS), reasonSlotChanged)
 	}
 	switch {
 	case next.AutoEnabled && !cur.AutoEnabled:
@@ -422,25 +438,72 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	s.writeSettings(w)
 }
 
-// overflowWith trả thông báo lỗi nếu có ngày ≥ hôm nay mà max(mốc daily, nSlots) + số phiên
-// bơm thử vượt maxEntriesPerLine; "" nếu ổn.
-func (s *Server) overflowWith(nSlots int, now time.Time) (string, error) {
+// lateNewSlots trả các lần mới trong next (giờ chưa có trong cur, chưa có phiên auto hôm nay) mà
+// giờ chốt hôm nay đã qua lúc now, khi tự động đang bật và vẫn bật. Các lần này được ghi "bỏ"
+// cùng lúc lưu tham số, như luật bật tự động giữa ngày: không chốt bù làm tưới thêm/trừ sổ lần nữa.
+// Bật tự động từ tắt thì không cần: auto_enabled_at = now đã làm scheduler bỏ các lần đó.
+func (s *Server) lateNewSlots(cur, next Params, today string, now time.Time) ([]Slot, error) {
+	if !cur.AutoEnabled || !next.AutoEnabled {
+		return nil, nil
+	}
+	old := map[int]bool{}
+	for _, sl := range cur.Slots {
+		old[sl.StartS] = true
+	}
+	decided, err := s.Store.Decided(today)
+	if err != nil {
+		return nil, err
+	}
+	var out []Slot
+	for _, sl := range sortedSlots(next.Slots) {
+		if old[sl.StartS] || decided[sl.StartS] {
+			continue
+		}
+		at, err := decideAt(today, sl)
+		if err != nil {
+			return nil, err
+		}
+		if !at.After(now) {
+			out = append(out, sl)
+		}
+	}
+	return out, nil
+}
+
+// overflowWith trả thông báo lỗi nếu với tham số p có ngày ≥ today mà dòng 2 vượt
+// maxEntriesPerLine: lineBase (tính cả phiên auto đã chốt của hôm nay; skips là các lần hôm nay
+// sắp ghi "bỏ") + số phiên bơm thử; "" nếu ổn. Hôm nay luôn được xét, kể cả khi không có phiên
+// bơm thử (đổi giờ giữa ngày có thể làm dòng 2 dài thêm).
+func (s *Server) overflowWith(p Params, today string, skips []Slot) (string, error) {
 	daily, err := s.Store.Daily()
 	if err != nil {
 		return "", err
 	}
-	counts, err := s.Store.manualCountsFrom(now.In(vietnam).Format(time.DateOnly))
+	counts, err := s.Store.manualCountsFrom(today)
 	if err != nil {
 		return "", err
 	}
-	dates := make([]string, 0, len(counts))
+	dates := []string{today}
 	for d := range counts {
-		dates = append(dates, d)
+		if d != today {
+			dates = append(dates, d)
+		}
 	}
 	sort.Strings(dates)
-	base := max(len(parseLineEntries(daily)), nSlots)
+	skipped := map[int]bool{}
+	for _, sl := range skips {
+		skipped[sl.StartS] = true
+	}
 	for _, d := range dates {
-		if n := counts[d]; base+n > maxEntriesPerLine {
+		ss, err := s.Store.Sessions(d)
+		if err != nil {
+			return "", err
+		}
+		var sk map[int]bool
+		if d == today {
+			sk = skipped
+		}
+		if base, n := lineBase(daily, p, ss, sk), manualCount(ss); base+n > maxEntriesPerLine {
 			return fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc daily/tự động + %d phiên bơm thử). Xoá bớt phiên bơm thử hoặc bớt lần tưới.",
 				d, maxEntriesPerLine, base, n), nil
 		}
@@ -451,6 +514,9 @@ func (s *Server) overflowWith(nSlots int, now time.Time) (string, error) {
 // handleDailyFromSlots đặt lịch dự phòng = các lần tự động, mỗi lần đủ block. Số mốc daily mới
 // = số lần tự động, nên không làm dòng 2 của ngày nào dài thêm.
 func (s *Server) handleDailyFromSlots(w http.ResponseWriter, r *http.Request) {
+	if !requireJSON(w, r) { // chống CSRF như các route ghi khác; body bỏ qua
+		return
+	}
 	p, err := s.Store.Params()
 	if err != nil {
 		log.Printf("UI: lỗi đọc tham số: %v", err)

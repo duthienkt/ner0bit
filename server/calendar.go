@@ -83,9 +83,44 @@ func parseLineEntries(line string) []entry {
 	return es
 }
 
+// lineBase là số mốc tối đa của dòng 2 ngày date, chưa kể phiên manual, ở trường hợp xấu nhất
+// giữa tự động tắt (các mốc daily) và tự động bật (phiên auto đã chốt có run > 0 + các lần trong
+// p.Slots chưa có phiên auto). ss là các phiên của ngày; skipped là các giờ sắp ghi "bỏ" (không
+// tính). Ngày chưa có phiên auto nào thì bằng max(mốc daily, số lần tự động).
+func lineBase(daily string, p Params, ss []Session, skipped map[int]bool) int {
+	decided := map[int]bool{}
+	n := 0
+	for _, x := range ss {
+		if x.Source != sessionAuto {
+			continue
+		}
+		decided[x.StartS] = true
+		if x.State == stateFinal && x.RunS > 0 {
+			n++
+		}
+	}
+	for _, sl := range p.Slots {
+		if !decided[sl.StartS] && !skipped[sl.StartS] {
+			n++
+		}
+	}
+	return max(len(parseLineEntries(daily)), n)
+}
+
+// manualCount đếm phiên manual còn hiệu lực trong ss.
+func manualCount(ss []Session) int {
+	n := 0
+	for _, x := range ss {
+		if x.Source == sessionManual && x.State != stateDeleted {
+			n++
+		}
+	}
+	return n
+}
+
 // AddManualSession lưu một phiên bơm thử. Kiểm tra giới hạn dữ liệu và số mốc của dòng 2:
-// max(mốc daily, số lần tự động) + các phiên manual còn hiệu lực + phiên mới ≤ maxEntriesPerLine,
-// để dòng 2 không vượt giới hạn firmware dù tự động bật hay tắt (lúc thêm hay về sau); sai ⇒ *errSession.
+// lineBase + các phiên manual còn hiệu lực + phiên mới ≤ maxEntriesPerLine, để dòng 2 không vượt
+// giới hạn firmware dù tự động bật hay tắt (lúc thêm hay về sau); sai ⇒ *errSession.
 func (s *Store) AddManualSession(date string, startS, runS int, note string) (Session, error) {
 	if _, err := time.Parse(time.DateOnly, date); err != nil {
 		return Session{}, &errSession{"Ngày phải dạng YYYY-MM-DD."}
@@ -104,13 +139,13 @@ func (s *Store) AddManualSession(date string, startS, runS int, note string) (Se
 	if err != nil {
 		return Session{}, err
 	}
-	man, err := s.manualEntries(date)
+	ss, err := s.Sessions(date)
 	if err != nil {
 		return Session{}, err
 	}
-	if base := max(len(parseLineEntries(daily)), len(p.Slots)); base+len(man)+1 > maxEntriesPerLine {
+	if base, n := lineBase(daily, p, ss, nil), manualCount(ss); base+n+1 > maxEntriesPerLine {
 		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc (%d mốc daily/tự động + %d phiên bơm thử).",
-			date, maxEntriesPerLine, base, len(man))}
+			date, maxEntriesPerLine, base, n)}
 	}
 	now := time.Now().In(vietnam)
 	id, err := insertManualSessionRaw(s.db, date, startS, runS, note, now)
