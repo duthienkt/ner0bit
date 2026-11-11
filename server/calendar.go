@@ -103,18 +103,33 @@ func (s *Store) AddManualSession(date string, startS, runS int, note string) (Se
 		return Session{}, &errSession{fmt.Sprintf("Lịch ngày %s sẽ vượt %d mốc.", date, maxEntriesPerLine)}
 	}
 	now := time.Now().In(vietnam)
-	res, err := s.db.Exec(`INSERT INTO sessions(date, start_s, run_s, source, state, note, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		date, startS, runS, sessionManual, stateFinal, note, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	id, err := insertManualSessionRaw(s.db, date, startS, runS, note, now)
 	if err != nil {
-		return Session{}, fmt.Errorf("thêm phiên: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Session{}, fmt.Errorf("thêm phiên: %w", err)
+		return Session{}, err
 	}
 	return Session{ID: id, Date: date, StartS: startS, RunS: runS, Source: sessionManual,
 		State: stateFinal, Note: note, CreatedAt: now}, nil
+}
+
+// execer là phần chung của *sql.DB và *sql.Tx để dùng một câu INSERT cho cả hai.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// insertManualSessionRaw chèn phiên manual, không kiểm tra gì (dùng cho nhập dữ liệu cũ,
+// kể cả ngày đã qua). Trả id phiên mới.
+func insertManualSessionRaw(x execer, date string, startS, runS int, note string, now time.Time) (int64, error) {
+	res, err := x.Exec(`INSERT INTO sessions(date, start_s, run_s, source, state, note, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		date, startS, runS, sessionManual, stateFinal, note, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("thêm phiên: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("thêm phiên: %w", err)
+	}
+	return id, nil
 }
 
 // DeleteManualSession đặt state=deleted cho phiên manual; không có phiên manual đó ⇒ *errSession.

@@ -54,6 +54,11 @@ func main() {
 	}
 	defer store.Close()
 	srv.Store = store
+	if ok, err := ImportLegacy(store, srv.DataDir, time.Now().In(vietnam).Format(time.DateOnly)); err != nil {
+		log.Fatalf("nhập dữ liệu cũ: %v", err)
+	} else if ok {
+		log.Print("Đã nhập dữ liệu cũ (schedule.json, heartbeats.jsonl, events.jsonl) vào SQLite; các file cũ được giữ nguyên")
+	}
 	if d, err := store.Daily(); err != nil || d == "" {
 		// Không dừng: lưu lịch qua UI là có hiệu lực ngay; tới lúc đó heartbeat trả 503.
 		log.Printf("CẢNH BÁO: lịch chưa dùng được (chưa đặt lịch dự phòng): %v", err)
