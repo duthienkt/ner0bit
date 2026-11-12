@@ -119,6 +119,19 @@ section:first-of-type { border-top: 0; }
 h2 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
 .sec-lede { color: var(--ink-soft); margin-bottom: 16px; max-width: 62ch; }
 
+.tabs { display: flex; margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.tabs button {
+  flex: 1; min-height: 44px; border: 0; background: none;
+  font-weight: 600; cursor: pointer; position: relative;
+}
+.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+.tab-dot {
+  position: absolute; top: 10px; right: 10px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--amber);
+}
+.tabs button[aria-selected="true"] .tab-dot { background: var(--amber); }
+
 /* ---- Trạng thái ---- */
 .status {
   margin-top: 8px; padding: 22px 20px 18px;
@@ -352,6 +365,13 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
   <p class="conn" id="conn" role="status">Không kết nối được server. Sẽ thử lại sau 15 giây.</p>
   <noscript><p class="conn show">Trang này cần JavaScript.</p></noscript>
 
+  <nav class="tabs" role="tablist" aria-label="Phần của trang">
+    <button type="button" role="tab" id="tab-trang-thai" aria-controls="panel-trang-thai">Trạng thái</button>
+    <button type="button" role="tab" id="tab-hoat-dong" aria-controls="panel-hoat-dong">Hoạt động</button>
+    <button type="button" role="tab" id="tab-lich" aria-controls="panel-lich">Lịch tưới<span class="tab-dot" id="tab-dirty" hidden></span></button>
+  </nav>
+
+  <div role="tabpanel" id="panel-trang-thai" aria-labelledby="tab-trang-thai" hidden>
   <section aria-labelledby="pump-text">
     <div class="status">
       <div class="pump" id="pump"><span class="pump-dot"></span><h1 class="pump-text" id="pump-text">Đang tải…</h1></div>
@@ -377,7 +397,17 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
       <p class="trial-note">Thêm một phiên bơm thử 5 phút. Thiết bị nhận lịch ở heartbeat kế tiếp (tối đa 5 phút), nên đặt từ 7 phút trở lên.</p>
     </div>
   </section>
+  </div>
 
+  <div role="tabpanel" id="panel-hoat-dong" aria-labelledby="tab-hoat-dong" hidden>
+  <section aria-labelledby="ev-h">
+    <div class="sec-head"><h2 id="ev-h">Hoạt động gần đây</h2></div>
+    <div id="events"></div>
+    <button class="btn btn-line more" type="button" id="more">Xem thêm</button>
+  </section>
+  </div>
+
+  <div role="tabpanel" id="panel-lich" aria-labelledby="tab-lich" hidden>
   <section aria-labelledby="cal-h">
     <div class="sec-head"><h2 id="cal-h">Lịch tưới</h2></div>
     <p class="sec-lede">Các lần tưới của từng ngày. Khi tưới theo thời tiết, server chốt từng lần lúc :09 trước giờ tưới; phần in nghiêng là bản tạm, còn đổi theo mưa. Thêm phiên bơm thử chỉ cộng thêm, không đụng các lần khác.</p>
@@ -411,12 +441,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     <div id="load-error"></div>
     <div id="daily"></div>
   </section>
-
-  <section aria-labelledby="ev-h">
-    <div class="sec-head"><h2 id="ev-h">Hoạt động gần đây</h2></div>
-    <div id="events"></div>
-    <button class="btn btn-line more" type="button" id="more">Xem thêm</button>
-  </section>
+  </div>
 
   <footer>Trạng thái và hoạt động tự làm mới mỗi 15 giây. Giờ hiển thị theo giờ Việt Nam.</footer>
   <div class="savebar" id="savebar" role="region" aria-label="Lưu lịch thủ công">
@@ -695,6 +720,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var bar = $('savebar'), msg = $('save-msg');
     var dirty = isDirty();
     bar.classList.toggle('show', dirty);
+    $('tab-dirty').hidden = !dirty;
     if (!dirty) return;
     var errs = validate(model);
     $('save').disabled = saving || errs.length > 0;
@@ -1410,6 +1436,50 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     if (isDirty() || formDirty()) { e.preventDefault(); e.returnValue = ''; }
   });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+
+  // ---- Tab Trạng thái / Hoạt động / Lịch tưới (điều hướng theo hash) ----
+  var TAB_IDS = ['trang-thai', 'hoat-dong', 'lich'];
+  var focusAfterHash = null; // nút cần focus sau khi hashchange xử lý xong
+
+  function tabFromHash() {
+    var v = location.hash.slice(1);
+    return TAB_IDS.indexOf(v) >= 0 ? v : 'trang-thai';
+  }
+
+  function selectTab(name) {
+    TAB_IDS.forEach(function (id) {
+      var on = id === name, btn = $('tab-' + id);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      btn.tabIndex = on ? 0 : -1;
+      $('panel-' + id).hidden = !on;
+    });
+  }
+
+  TAB_IDS.forEach(function (id) {
+    $('tab-' + id).addEventListener('click', function () { location.hash = id; });
+  });
+
+  window.addEventListener('hashchange', function () {
+    selectTab(tabFromHash());
+    if (focusAfterHash) { focusAfterHash.focus(); focusAfterHash = null; }
+  });
+
+  document.querySelector('nav.tabs').addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault(); // không cuộn trang
+    var i = TAB_IDS.indexOf(tabFromHash());
+    var next = (i + (e.key === 'ArrowRight' ? 1 : TAB_IDS.length - 1)) % TAB_IDS.length;
+    focusAfterHash = $('tab-' + TAB_IDS[next]);
+    if (location.hash.slice(1) === TAB_IDS[next]) {
+      selectTab(TAB_IDS[next]); // hash không đổi thì không có sự kiện hashchange
+      focusAfterHash.focus();
+      focusAfterHash = null;
+    } else {
+      location.hash = TAB_IDS[next];
+    }
+  });
+
+  selectTab(tabFromHash());
 
   trialLabel();
   refresh();

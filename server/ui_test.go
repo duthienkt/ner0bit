@@ -675,3 +675,17 @@ func TestLoginUntrackedFailuresSerialized(t *testing.T) {
 		t.Errorf("lần sai đầu: code %d, want 401", code)
 	}
 }
+
+func TestPageTabs(t *testing.T) {
+	s, _, _ := newUIServer(t, goodSchedule)
+	c := mustLogin(t, s)
+	body := do(s, http.MethodGet, "/", "", withCookie(c)).Body.String()
+	for _, want := range []string{
+		`role="tablist"`, `id="panel-trang-thai"`, `id="panel-hoat-dong"`,
+		`id="panel-lich"`, `id="tab-dirty"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("trang đã đăng nhập thiếu %s", want)
+		}
+	}
+}
