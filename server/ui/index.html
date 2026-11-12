@@ -720,6 +720,7 @@ footer { padding: 24px 0 40px; font-size: 13px; color: var(--ink-soft); }
     var bar = $('savebar'), msg = $('save-msg');
     var dirty = isDirty();
     bar.classList.toggle('show', dirty);
+    $('tab-dirty').hidden = !dirty;
     if (!dirty) return;
     var errs = validate(model);
     $('save').disabled = saving || errs.length > 0;
